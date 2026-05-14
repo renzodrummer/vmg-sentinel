@@ -1,12 +1,49 @@
 {
   "name": "vmg-sentinel",
   "version": "0.0.0",
+  "main": "electron/main.js",
   "scripts": {
     "ng": "ng",
-    "start": "ng serve",
+    "start": "concurrently \"npm run watch:angular\" \"npm run watch:electron\" \"npm run electron:dev\"",
+    "watch:angular": "ng build --watch --configuration=development",
+    "watch:electron": "tsc -p electron/tsconfig.json -w",
+    "electron:dev": "nodemon --watch dist/electron --ext js --exec \"electron .\"",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test"
+  },
+  "build": {
+    "appId": "com.vmg.sentinel",
+    "productName": "VMG Sentinel",
+    "compression": "maximum",
+    "asar": true,
+    "directories": {
+      "output": "dist-app"
+    },
+    "files": [
+      "package.json",
+      "dist/electron/**/*",
+      "dist/sentinel/browser/**/*",
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false
+    }
   },
   "private": true,
   "packageManager": "npm@11.3.0",
@@ -17,14 +54,18 @@
     "@angular/forms": "^21.2.0",
     "@angular/platform-browser": "^21.2.0",
     "@angular/router": "^21.2.0",
+    "concurrently": "^9.2.1",
     "rxjs": "~7.8.0",
+    "sharp": "^0.34.5",
     "tslib": "^2.3.0"
   },
   "devDependencies": {
     "@angular/build": "^21.2.10",
     "@angular/cli": "^21.2.10",
     "@angular/compiler-cli": "^21.2.0",
+    "electron": "^42.0.1",
     "jsdom": "^28.0.0",
+    "nodemon": "^3.1.14",
     "prettier": "^3.8.1",
     "typescript": "~5.9.2",
     "vitest": "^4.0.8"

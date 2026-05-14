@@ -1,0 +1,18 @@
+const { contextBridge, ipcRenderer } = require('electron');
+
+contextBridge.exposeInMainWorld('electronAPI', {
+  captureScreen: () => ipcRenderer.send('capture-screen'),
+  startAutoCapture: (intervalMinutes) => ipcRenderer.send('start-auto-capture', intervalMinutes),
+  stopAutoCapture: () => ipcRenderer.send('stop-auto-capture'),
+  getScreenCount: () => ipcRenderer.invoke('get-screen-count'),
+
+  captureMultiScreen: () => ipcRenderer.send('capture-multi-screen'),
+
+  captureActiveScreen: () => ipcRenderer.send('capture-active-screen'),
+
+  getVideoSources: () => ipcRenderer.invoke('getSources'),
+  getOperatingSystem: () => ipcRenderer.invoke('getOperatingSystem'),
+  startRecordingStream: () => ipcRenderer.invoke('startRecording'),
+  saveVideoChunk: (arrayBuffer) => ipcRenderer.send('saveChunk', arrayBuffer),
+  stopAndSaveRecording: () => ipcRenderer.invoke('stopRecordingAndSave'),
+});

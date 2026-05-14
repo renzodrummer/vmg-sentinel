@@ -1,34 +1,58 @@
 <div class="app-container">
   <section class="feature-section">
     <h3>1. Time Tracker</h3>
-    <div class="time-display">00:00:00</div>
+    <div class="time-display">
+      <p id="screen-info">{{ screenInfoText }}</p>
+    </div>
     <div class="controls">
-      <button>Start Timer</button>
-      <button>Stop Timer</button>
+      <button id="camera-btn" (click)="toggleTracking()">
+        {{ isTracking ? 'Stop Tracking' : 'Start Tracking' }}
+      </button>
     </div>
   </section>
 
   <hr />
 
   <section class="feature-section">
-    <h3>2. Screen Capture</h3>
-    <button>Take Screenshot</button>
+    <h3>2. Screen Capture Multiple screen</h3>
+    <button id="multi-capture-btn" (click)="captureAllScreensNow()">Multi-Screen Capture</button>
   </section>
 
   <hr />
 
   <section class="feature-section">
-    <h3>3. Screen Recorder</h3>
-    <div class="recorder-controls" style="display: flex; gap: 5px; align-items: center">
-      <button>Start</button>
-      <button>Stop</button>
-      <button>Get Video Sources</button>
+    <h3>3. Screen Capture Foreground Application</h3>
+    <button id="active-capture-btn" (click)="captureActiveScreenNow()">
+      Capture Active Screen Only
+    </button>
+  </section>
 
-      <select>
-        <option value="" disabled selected></option>
-        <option value="screen1">Screen 1</option>
-        <option value="window1">Window 1</option>
+  <hr />
+
+  <section class="feature-section">
+    <h3>4. Screen Recorder</h3>
+
+    <div class="recorder-controls">
+      <button *ngIf="!isRecording" (click)="startRecording()">Start</button>
+      <button *ngIf="isRecording" (click)="stopRecording()">Stop</button>
+
+      <button (click)="fetchVideoSources()">Get Video Sources</button>
+
+      <select [(ngModel)]="selectedSourceId" [disabled]="isRecording" class="source-select">
+        <option value="" disabled selected *ngIf="availableSources.length === 0">
+          Select a source...
+        </option>
+        <option *ngFor="let source of availableSources" [value]="source.id">
+          {{ source.name }}
+        </option>
       </select>
+
+      <div class="recording-badge" *ngIf="isRecording">
+        <div class="pulse-dot"></div>
+        Recording...
+      </div>
     </div>
+
+    <video #previewVideo muted style="display: none"></video>
   </section>
 </div>
