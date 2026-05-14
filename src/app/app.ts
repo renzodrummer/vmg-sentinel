@@ -148,7 +148,7 @@ export class App implements OnInit {
       }
     };
 
-    this.mediaRecorder.start(1000);
+    this.mediaRecorder.start(3000);
   }
 
   async stopRecording() {

@@ -1,7 +1,22 @@
+html,
+body {
+  -webkit-app-region: drag;
+  height: 100%;
+  margin: 5;
+  user-select: none;
+}
+
 button,
 input,
 select,
+textarea,
 a {
   -webkit-app-region: no-drag !important;
   cursor: pointer;
+}
+
+.selectable-text {
+  -webkit-app-region: no-drag !important;
+  user-select: text;
+  cursor: text;
 }

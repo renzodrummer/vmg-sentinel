@@ -15,6 +15,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
 const sharp = require('sharp');
+const { Worker } = require('node:worker_threads');
 
 let autoCaptureInterval = null;
 let autoCaptureTimeout = null;
@@ -22,6 +23,24 @@ let autoCaptureTimeout = null;
 let writeStream = null;
 let tempFilePath = null;
 let recordingWidgetWindow = null;
+
+function processImageInWorker(imgBuffer) {
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(path.join(__dirname, 'image-worker.js'));
+
+    worker.on('message', (msg) => {
+      worker.terminate();
+      if (msg.success) {
+        resolve(msg.buffer);
+      } else {
+        reject(new Error(msg.error));
+      }
+    });
+
+    worker.on('error', reject);
+    worker.postMessage({ buffer: imgBuffer });
+  });
+}
 
 async function executeSecureCapture() {
   try {
@@ -45,12 +64,13 @@ async function executeSecureCapture() {
         try {
           let imgBuffer = source.thumbnail.toPNG();
 
-          imgBuffer = await sharp(imgBuffer).blur(15).jpeg({ quality: 80 }).toBuffer();
+          imgBuffer = await processImageInWorker(imgBuffer);
 
           const fileName = `screenshot-screen${index + 1}-${timestamp}.jpg`;
           const filePath = path.join(os.homedir(), fileName);
 
           await fs.promises.writeFile(filePath, imgBuffer);
+          imgBuffer = null;
         } catch (processingError) {
           console.error(processingError);
         }
@@ -109,6 +129,11 @@ app.whenReady().then(() => {
   });
 
   ipcMain.on('start-auto-capture', (event, intervalMinutes) => {
+    if (typeof intervalMinutes !== 'number' || intervalMinutes < 1 || intervalMinutes > 1440) {
+      console.warn('Security Block: Invalid interval provided for auto-capture.');
+      return;
+    }
+
     const intervalMs = intervalMinutes * 60 * 1000;
 
     executeSecureCapture();
@@ -156,13 +181,14 @@ app.whenReady().then(() => {
       screens.map(async (source, index) => {
         let imgBuffer = source.thumbnail.toPNG();
         try {
-          imgBuffer = await sharp(imgBuffer).blur(15).jpeg({ quality: 80 }).toBuffer();
+          imgBuffer = await processImageInWorker(imgBuffer);
 
           const fileName = `screenshot-screen${index + 1}-${timestamp}.jpg`;
           const filePath = path.join(os.homedir(), fileName);
 
           await fs.promises.writeFile(filePath, imgBuffer);
           shell.openExternal(`file://${filePath}`);
+          imgBuffer = null;
         } catch (processingError) {
           console.error(`Failed to process image:`, processingError);
         }
@@ -196,20 +222,21 @@ app.whenReady().then(() => {
       let imgBuffer = activeSource.thumbnail.toPNG();
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
 
-      imgBuffer = await sharp(imgBuffer).blur(15).jpeg({ quality: 80 }).toBuffer();
+      imgBuffer = await processImageInWorker(imgBuffer);
 
       const fileName = `screenshot-active-${timestamp}.jpg`;
       const filePath = path.join(os.homedir(), fileName);
 
       await fs.promises.writeFile(filePath, imgBuffer);
       shell.openExternal(`file://${filePath}`);
+      imgBuffer = null;
     } catch (error) {
       console.error('Failed to process/blur the active screen:', error);
     }
   });
 
   // screen recording
-  
+
   ipcMain.handle('getSources', async () => {
     return await desktopCapturer.getSources({ types: ['window', 'screen'] });
   });
@@ -225,7 +252,14 @@ app.whenReady().then(() => {
     return true;
   });
 
+  const MAX_CHUNK_SIZE = 50 * 1024 * 1024;
+
   ipcMain.on('saveChunk', (event, arrayBuffer) => {
+    if (!arrayBuffer || arrayBuffer.byteLength > MAX_CHUNK_SIZE) {
+      console.warn('Security Block: Video chunk exceeds maximum allowed size or is invalid.');
+      return;
+    }
+
     if (writeStream) {
       writeStream.write(Buffer.from(arrayBuffer));
     }
