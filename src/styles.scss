@@ -1,4 +1,7 @@
-/* You can add global styles to this file, and also import other style files */
-body {
-  -webkit-app-region: drag;
+button,
+input,
+select,
+a {
+  -webkit-app-region: no-drag !important;
+  cursor: pointer;
 }
