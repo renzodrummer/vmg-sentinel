@@ -28,6 +28,12 @@ export class ElectronService {
     throw new Error('Electron API not found');
   }
 
+  async setAuthCookie(url: string, name: string, value: string): Promise<void> {
+    if (this.isElectron) {
+      await window.electronAPI.setAuthCookie(url, name, value);
+    }
+  }
+
   triggerMultiScreenCapture(): void {
     if (this.isElectron) {
       window.electronAPI.captureMultiScreen();

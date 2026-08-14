@@ -1,5 +1,58 @@
 <div class="app-container">
   <section class="feature-section">
+    <h3>Realtime — Citadel Socket</h3>
+    <div class="socket-panel">
+      <p><strong>URL:</strong> {{ citadelApiUrl }}</p>
+      <label class="socket-cookie-field">
+        <span>Auth cookie (stored in Electron session, sent via withCredentials)</span>
+        <code>{{ actoCookieName }}=&lt;token&gt;</code>
+        <input
+          type="text"
+          [(ngModel)]="actoToken"
+          placeholder="Paste acto JWT (same value as Postman acto variable)"
+          autocomplete="off"
+        />
+      </label>
+      <p>
+        <strong>Status:</strong>
+        <span class="socket-status" [class]="socketStatus">{{ socketStatusMessage }}</span>
+      </p>
+      <button type="button" (click)="reconnectSocket()">Connect</button>
+    </div>
+
+    <div class="timetracker-live" *ngIf="timetrackerState as state">
+      <p class="timetracker-live-label">Live timetracker state</p>
+      <div class="timetracker-status-row">
+        <span class="status-badge" [class]="state.status">{{ formatStatus(state.status) }}</span>
+        <span class="tracking-badge" [class.active]="state.is_tracking">
+          {{ state.is_tracking ? 'Tracking' : 'Not tracking' }}
+        </span>
+      </div>
+      <p class="timetracker-meta">
+        Shift start: {{ state.timelog_start || '—' }}
+      </p>
+    </div>
+
+    <div class="status-change-notice" *ngIf="statusNotice as notice">
+      <div class="pulse-dot"></div>
+      <div>
+        <strong>{{ notice.message }}</strong>
+        <span class="notice-meta">{{ notice.event }} · {{ notice.at }}</span>
+      </div>
+    </div>
+
+    <div class="socket-event" *ngIf="lastSocketEventName">
+      <p><strong>Last event:</strong> {{ lastSocketEventName }} at {{ lastSocketEventAt }}</p>
+      <pre>{{ lastSocketEventPayload }}</pre>
+    </div>
+    <p class="socket-hint" *ngIf="!lastSocketEventName">
+      Listening for timetracker socket events…
+    </p>
+  </section>
+
+  <hr />
+
+  <section class="feature-section">
     <h3>1. Time Tracker</h3>
     <div class="time-display">
       <p id="screen-info">{{ screenInfoText }}</p>

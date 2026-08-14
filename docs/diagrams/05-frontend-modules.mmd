@@ -1,0 +1,30 @@
+flowchart TB
+  subgraph ui["UI layer"]
+    AppHtml["src/app/app.html<br/>badges, notice, debug panel"]
+    AppTs["src/app/app.ts<br/>connect/disconnect triggers,<br/>change-detection listener"]
+  end
+
+  subgraph svc["Service layer"]
+    Socket["src/app/citadel-socket.service.ts<br/>io connection, 4 listeners,<br/>parsing, notices, status"]
+    Elec["src/app/electron.service.ts<br/>electronAPI wrapper"]
+  end
+
+  subgraph contract["Contract layer"]
+    Const["src/app/constants/<br/>timetracker-socket.constants.ts<br/>event names, status labels"]
+    Model["src/app/models/<br/>timetracker-socket.interface.ts<br/>payload and notice types"]
+    Env["src/environments/environment.ts<br/>citadelApiUrl, actoCookieName"]
+  end
+
+  subgraph desktop["Electron process layer"]
+    Pre["electron/preload.js"]
+    Mn["electron/main.js"]
+  end
+
+  AppHtml <--> AppTs
+  AppTs --> Socket
+  AppTs --> Elec
+  Socket --> Const
+  Socket --> Model
+  Socket --> Env
+  Socket -->|"setAuthCookie callback"| Elec
+  Elec --> Pre --> Mn

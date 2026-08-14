@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VMG Timetracker — Socket.IO (Web)</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 0;
+        padding: 24px;
+        background: #f5f5f5;
+        color: #212529;
+      }
+
+      .app-container {
+        max-width: 720px;
+        margin: 0 auto;
+        background: #fff;
+        border-radius: 10px;
+        padding: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 1.35rem;
+      }
+
+      .subtitle {
+        margin: 0 0 20px;
+        color: #6c757d;
+        font-size: 0.9rem;
+      }
+
+      .feature-section {
+        margin-bottom: 20px;
+      }
+
+      label {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 0.9rem;
+        margin-bottom: 12px;
+      }
+
+      input[type='text'] {
+        padding: 8px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.85rem;
+      }
+
+      button {
+        padding: 8px 16px;
+        border: none;
+        border-radius: 4px;
+        background: #0d6efd;
+        color: #fff;
+        cursor: pointer;
+        font-size: 0.9rem;
+      }
+
+      button:hover {
+        background: #0b5ed7;
+      }
+
+      button.secondary {
+        background: #6c757d;
+      }
+
+      .socket-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+
+      .socket-status.connected {
+        color: #198754;
+      }
+
+      .socket-status.connecting {
+        color: #856404;
+      }
+
+      .socket-status.error {
+        color: #dc3545;
+      }
+
+      .socket-status.disconnected {
+        color: #6c757d;
+      }
+
+      .hint {
+        font-size: 0.85rem;
+        color: #6c757d;
+        background: #f8f9fa;
+        border-left: 3px solid #0d6efd;
+        padding: 10px 12px;
+        margin: 0 0 16px;
+      }
+
+      .timetracker-live {
+        margin: 12px 0;
+        padding: 12px;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        background: #fafafa;
+      }
+
+      .timetracker-live-label {
+        margin: 0 0 8px;
+        font-size: 0.85rem;
+        color: #6c757d;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+
+      .timetracker-status-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+
+      .status-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: #fff;
+        background: #6c757d;
+      }
+
+      .status-badge.online {
+        background: #198754;
+      }
+
+      .status-badge.busy {
+        background: #dc3545;
+      }
+
+      .status-badge.bio_break,
+      .status-badge.lunch_break,
+      .status-badge.unpaid_break {
+        background: #fd7e14;
+      }
+
+      .status-badge.in_a_meeting,
+      .status-badge.official_business {
+        background: #0d6efd;
+      }
+
+      .tracking-badge {
+        display: inline-block;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 0.8rem;
+        background: #e9ecef;
+        color: #495057;
+      }
+
+      .tracking-badge.active {
+        background: #d1e7dd;
+        color: #0f5132;
+      }
+
+      .timetracker-meta {
+        margin: 8px 0 0;
+        font-size: 0.85rem;
+        color: #495057;
+      }
+
+      .status-change-notice {
+        display: none;
+        align-items: flex-start;
+        gap: 10px;
+        margin: 12px 0;
+        padding: 12px 14px;
+        border-radius: 8px;
+        background: #cff4fc;
+        border: 1px solid #9eeaf9;
+        color: #055160;
+        animation: notice-in 0.25s ease-out;
+      }
+
+      .status-change-notice.visible {
+        display: flex;
+      }
+
+      .pulse-dot {
+        width: 8px;
+        height: 8px;
+        margin-top: 6px;
+        background-color: #055160;
+        border-radius: 50%;
+        animation: pulse 1.5s infinite;
+        flex-shrink: 0;
+      }
+
+      .notice-meta {
+        display: block;
+        margin-top: 4px;
+        font-size: 0.8rem;
+        opacity: 0.85;
+      }
+
+      .socket-event {
+        display: none;
+        margin-top: 12px;
+      }
+
+      .socket-event.visible {
+        display: block;
+      }
+
+      .socket-event pre {
+        background: #f4f4f4;
+        border-radius: 6px;
+        padding: 12px;
+        font-size: 0.8rem;
+        overflow: auto;
+        max-height: 240px;
+      }
+
+      .waiting-hint {
+        color: #6c757d;
+        font-size: 0.9rem;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      @keyframes notice-in {
+        from {
+          opacity: 0;
+          transform: translateY(-4px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-container">
+      <h1>Realtime — Citadel Socket (Web)</h1>
+      <p class="subtitle">Plain HTML client — same events as the Electron app</p>
+
+      <p class="hint">
+        Log in to the <strong>admin portal</strong> in this browser first. On load, this page checks
+        your session via admin-api and connects automatically when cookies are present. The acto
+        cookie is sent on the socket via <code>withCredentials</code> — no token paste needed.
+      </p>
+
+      <section class="feature-section">
+        <div class="socket-panel">
+          <label>
+            Admin API URL
+            <input type="text" id="admin-url" value="https://admin-api-local.vmg-portal.com" />
+          </label>
+          <label>
+            Citadel API URL
+            <input type="text" id="citadel-url" value="https://citadel-api-local.vmg-portal.com" />
+          </label>
+          <p>
+            <strong>Connection:</strong>
+            <span id="socket-status" class="socket-status disconnected">Not connected</span>
+          </p>
+          <div>
+            <button type="button" id="connect-btn">Connect</button>
+            <button type="button" id="disconnect-btn" class="secondary">Disconnect</button>
+          </div>
+        </div>
+
+        <div id="timetracker-live" class="timetracker-live" hidden>
+          <p class="timetracker-live-label">Live timetracker state</p>
+          <div class="timetracker-status-row">
+            <span id="status-badge" class="status-badge">—</span>
+            <span id="tracking-badge" class="tracking-badge">Not tracking</span>
+          </div>
+          <p class="timetracker-meta">Shift start: <span id="timelog-start">—</span></p>
+        </div>
+
+        <div id="status-notice" class="status-change-notice">
+          <div class="pulse-dot"></div>
+          <div>
+            <strong id="notice-message"></strong>
+            <span class="notice-meta" id="notice-meta"></span>
+          </div>
+        </div>
+
+        <div id="socket-event" class="socket-event">
+          <p><strong>Last event:</strong> <span id="last-event-name"></span> at <span id="last-event-at"></span></p>
+          <pre id="last-event-payload"></pre>
+        </div>
+
+        <p id="waiting-hint" class="waiting-hint">Checking admin portal session…</p>
+      </section>
+    </div>
+
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+      const TIMETRACKER_SOCKET_EVENTS = [
+        'timetracker:state',
+        'timetracker:started',
+        'timetracker:status_changed',
+        'timetracker:stopped',
+      ];
+
+      const STATUS_LABELS = {
+        offline: 'Offline',
+        not_working: 'Not Working',
+        online: 'Online',
+        busy: 'Busy',
+        bio_break: 'Bio Break',
+        lunch_break: 'Lunch Break',
+        unpaid_break: 'Unpaid Break',
+        in_a_meeting: 'In a Meeting',
+        official_business: 'Official Business',
+      };
+
+      const els = {
+        adminUrl: document.getElementById('admin-url'),
+        citadelUrl: document.getElementById('citadel-url'),
+        connectBtn: document.getElementById('connect-btn'),
+        disconnectBtn: document.getElementById('disconnect-btn'),
+        socketStatus: document.getElementById('socket-status'),
+        timetrackerLive: document.getElementById('timetracker-live'),
+        statusBadge: document.getElementById('status-badge'),
+        trackingBadge: document.getElementById('tracking-badge'),
+        timelogStart: document.getElementById('timelog-start'),
+        statusNotice: document.getElementById('status-notice'),
+        noticeMessage: document.getElementById('notice-message'),
+        noticeMeta: document.getElementById('notice-meta'),
+        socketEvent: document.getElementById('socket-event'),
+        lastEventName: document.getElementById('last-event-name'),
+        lastEventAt: document.getElementById('last-event-at'),
+        lastEventPayload: document.getElementById('last-event-payload'),
+        waitingHint: document.getElementById('waiting-hint'),
+      };
+
+      let socket = null;
+      let timetrackerState = null;
+      const eventHandlers = new Map();
+
+      /**
+       * Browsers cannot read HttpOnly cross-origin cookies from JS.
+       * Probe admin-api GET /auth with credentials instead — same check the admin portal uses.
+       * @returns {Promise<'valid' | 'invalid' | 'unknown'>}
+       */
+      async function checkAdminPortalSession() {
+        const adminUrl = els.adminUrl.value.trim().replace(/\/$/, '');
+
+        if (!adminUrl) {
+          return 'unknown';
+        }
+
+        try {
+          const response = await fetch(adminUrl + '/auth', {
+            method: 'GET',
+            credentials: 'include',
+          });
+
+          if (!response.ok) {
+            return 'invalid';
+          }
+
+          const body = await response.json();
+          return body && body.success === true ? 'valid' : 'invalid';
+        } catch (error) {
+          console.warn('Admin session check failed (CORS or network):', error);
+          return 'unknown';
+        }
+      }
+
+      async function autoConnectIfSessionAvailable() {
+        setConnectionStatus('connecting', 'Checking admin portal session…');
+        els.waitingHint.textContent = 'Checking admin portal session…';
+
+        const session = await checkAdminPortalSession();
+
+        if (session === 'valid') {
+          setConnectionStatus('connecting', 'Session found — connecting to citadel-api…');
+          els.waitingHint.textContent = 'Connecting to citadel-api…';
+          connect();
+          return;
+        }
+
+        if (session === 'unknown') {
+          setConnectionStatus(
+            'connecting',
+            'Could not verify session from this page — attempting socket connect…',
+          );
+          els.waitingHint.textContent =
+            'Session check unavailable — attempting socket connect…';
+          connect();
+          return;
+        }
+
+        setConnectionStatus(
+          'disconnected',
+          'No admin portal session — log in first, then refresh or click Connect',
+        );
+        els.waitingHint.textContent =
+          'Log in to the admin portal in this browser, then refresh or click Connect.';
+      }
+
+      function formatStatus(status) {
+        return STATUS_LABELS[status] || status;
+      }
+
+      function setConnectionStatus(status, message) {
+        els.socketStatus.textContent = message;
+        els.socketStatus.className = 'socket-status ' + status;
+      }
+
+      function parsePayload(payload) {
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+          return null;
+        }
+        if (typeof payload.staff_id !== 'string' || typeof payload.status !== 'string') {
+          return null;
+        }
+        return payload;
+      }
+
+      function buildStatusNotice(eventName, payload, previousStatus) {
+        const at = new Date().toLocaleTimeString();
+        const statusLabel = formatStatus(payload.status);
+
+        switch (eventName) {
+          case 'timetracker:status_changed':
+            return {
+              event: eventName,
+              at,
+              message: 'Status changed to ' + statusLabel,
+            };
+          case 'timetracker:started':
+            return {
+              event: eventName,
+              at,
+              message: 'Shift started — ' + statusLabel,
+            };
+          case 'timetracker:stopped':
+            return {
+              event: eventName,
+              at,
+              message: 'Shift stopped',
+            };
+          case 'timetracker:state':
+            if (previousStatus && previousStatus !== payload.status) {
+              return {
+                event: eventName,
+                at,
+                message: 'Status updated to ' + statusLabel,
+              };
+            }
+            return null;
+          default:
+            return null;
+        }
+      }
+
+      function renderTimetrackerState(state) {
+        els.timetrackerLive.hidden = false;
+        els.statusBadge.textContent = formatStatus(state.status);
+        els.statusBadge.className = 'status-badge ' + state.status;
+        els.trackingBadge.textContent = state.is_tracking ? 'Tracking' : 'Not tracking';
+        els.trackingBadge.className =
+          'tracking-badge' + (state.is_tracking ? ' active' : '');
+        els.timelogStart.textContent = state.timelog_start || '—';
+      }
+
+      function showStatusNotice(notice) {
+        els.statusNotice.classList.add('visible');
+        els.noticeMessage.textContent = notice.message;
+        els.noticeMeta.textContent = notice.event + ' · ' + notice.at;
+      }
+
+      function handleTimetrackerEvent(eventName, payload) {
+        const parsed = parsePayload(payload);
+        if (!parsed) {
+          return;
+        }
+
+        const previousStatus = timetrackerState?.status;
+        timetrackerState = parsed;
+
+        renderTimetrackerState(parsed);
+
+        const notice = buildStatusNotice(eventName, parsed, previousStatus);
+        if (notice) {
+          showStatusNotice(notice);
+        }
+
+        els.waitingHint.hidden = true;
+        els.socketEvent.classList.add('visible');
+        els.lastEventName.textContent = eventName;
+        els.lastEventAt.textContent = new Date().toLocaleTimeString();
+        els.lastEventPayload.textContent = JSON.stringify(parsed, null, 2);
+      }
+
+      function connect() {
+        const citadelUrl = els.citadelUrl.value.trim();
+
+        if (!citadelUrl) {
+          setConnectionStatus('error', 'Citadel API URL is required');
+          return;
+        }
+
+        if (socket?.connected) {
+          return;
+        }
+
+        if (socket) {
+          setConnectionStatus('connecting', 'Reconnecting…');
+          socket.connect();
+          return;
+        }
+
+        setConnectionStatus('connecting', 'Connecting to citadel-api…');
+
+        socket = io(citadelUrl, {
+          withCredentials: true,
+          auth: {
+            clientType: 'web',
+          },
+          transports: ['polling', 'websocket'],
+        });
+
+        socket.on('connect', function () {
+          setConnectionStatus('connected', 'Connected (id: ' + socket.id + ')');
+        });
+
+        socket.on('disconnect', function (reason) {
+          setConnectionStatus('disconnected', 'Disconnected (' + reason + ')');
+        });
+
+        socket.on('connect_error', function (error) {
+          setConnectionStatus(
+            'error',
+            (error && error.message) ||
+              'Connection failed — log in to admin portal first, then retry',
+          );
+        });
+
+        TIMETRACKER_SOCKET_EVENTS.forEach(function (eventName) {
+          const handler = function (payload) {
+            handleTimetrackerEvent(eventName, payload);
+          };
+          eventHandlers.set(eventName, handler);
+          socket.on(eventName, handler);
+        });
+      }
+
+      function disconnect() {
+        if (!socket) {
+          setConnectionStatus('disconnected', 'Not connected');
+          return;
+        }
+
+        eventHandlers.forEach(function (handler, eventName) {
+          socket.off(eventName, handler);
+        });
+        eventHandlers.clear();
+        socket.disconnect();
+        socket = null;
+        setConnectionStatus('disconnected', 'Disconnected');
+      }
+
+      els.connectBtn.addEventListener('click', connect);
+      els.disconnectBtn.addEventListener('click', disconnect);
+
+      autoConnectIfSessionAvailable();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,16 @@
+flowchart LR
+  Ev["Four registered listeners<br/>timetracker:state<br/>timetracker:started<br/>timetracker:status_changed<br/>timetracker:stopped"] --> Parse{"parsePayload<br/>staff_id and status<br/>are strings?"}
+  Parse -->|"No"| Drop["Discard silently"]
+  Parse -->|"Yes"| Cache["Capture previousStatus<br/>then replace timetrackerState"]
+  Cache --> Render["Render status badge,<br/>tracking badge, shift start"]
+  Cache --> Notice{"buildStatusNotice<br/>by event name"}
+  Notice -->|"status_changed"| N1["Status changed to X"]
+  Notice -->|"started"| N2["Shift started - X"]
+  Notice -->|"stopped"| N3["Shift stopped"]
+  Notice -->|"state and status differs<br/>from previous"| N4["Status updated to X"]
+  Notice -->|"state and status unchanged"| N5["No notice - silent hydration"]
+  N1 --> Show["Show notice banner"]
+  N2 --> Show
+  N3 --> Show
+  N4 --> Show
+  Render --> Debug["Last-event panel:<br/>name, timestamp, JSON payload"]

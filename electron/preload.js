@@ -5,6 +5,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   startAutoCapture: (intervalMinutes) => ipcRenderer.send('start-auto-capture', intervalMinutes),
   stopAutoCapture: () => ipcRenderer.send('stop-auto-capture'),
   getScreenCount: () => ipcRenderer.invoke('get-screen-count'),
+  setAuthCookie: (url, name, value) => ipcRenderer.invoke('set-auth-cookie', url, name, value),
 
   captureMultiScreen: () => ipcRenderer.send('capture-multi-screen'),
 

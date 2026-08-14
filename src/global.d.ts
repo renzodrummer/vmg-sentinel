@@ -8,6 +8,7 @@ export interface ElectronAPI {
   startAutoCapture: (intervalMinutes: number) => void;
   stopAutoCapture: () => void;
   getScreenCount: () => Promise<number>;
+  setAuthCookie: (url: string, name: string, value: string) => Promise<void>;
 
   captureMultiScreen: () => void;
 

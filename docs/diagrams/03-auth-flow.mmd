@@ -1,0 +1,20 @@
+flowchart TD
+  Start(["Client starts"]) --> Which{"Runtime?"}
+
+  Which -->|"Browser - web/timetracker-socket.html"| Probe["GET adminApiUrl/auth<br/>credentials: include"]
+  Probe --> ProbeResult{"Response?"}
+  ProbeResult -->|"200 and success true"| DoConnect
+  ProbeResult -->|"CORS or network error - unknown"| DoConnect
+  ProbeResult -->|"401 or success false"| NoSession["Show: log in to admin portal,<br/>then refresh or click Connect"]
+  NoSession --> Manual["Manual Connect button"] --> DoConnect
+
+  Which -->|"Electron renderer"| Token{"acto token in<br/>localStorage acto-token?"}
+  Token -->|"No"| Paste["User pastes token in UI"] --> SetCookie
+  Token -->|"Yes"| SetCookie["ElectronService.setAuthCookie<br/>to IPC set-auth-cookie<br/>to session cookies.set"]
+  SetCookie --> DoConnect
+
+  DoConnect["io citadelApiUrl with<br/>withCredentials: true<br/>auth.clientType: web or electron<br/>transports: polling then websocket"]
+  DoConnect --> Handshake{"citadel-api validates<br/>JWT in acto cookie"}
+  Handshake -->|"Valid"| Joined["Server forces join room staff:staffId<br/>connect event fires"]
+  Handshake -->|"Invalid"| Err["connect_error - show error status"]
+  Joined --> Hydrate["timetracker:state received<br/>hydrate full UI"]

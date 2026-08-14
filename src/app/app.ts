@@ -1,8 +1,11 @@
-import { Component, OnInit, ChangeDetectorRef, ViewChild, ElementRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, ChangeDetectorRef, ViewChild, ElementRef } from '@angular/core';
 import { ElectronService } from './electron.service';
+import { CitadelSocketService } from './citadel-socket.service';
+import { formatTimetrackerStatus } from './constants/timetracker-socket.constants';
 import { DesktopSource } from '../global';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { environment } from '../environments/environment';
 
 @Component({
   selector: 'app-root',
@@ -10,9 +13,12 @@ import { FormsModule } from '@angular/forms';
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
-export class App implements OnInit {
+export class App implements OnInit, OnDestroy {
   isTracking = false;
   screenInfoText = 'Loading screen info...';
+  citadelApiUrl = environment.citadelApiUrl;
+  actoCookieName = environment.actoCookieName;
+  actoToken = localStorage.getItem('acto-token') ?? '';
 
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
   availableSources: DesktopSource[] = [];
@@ -22,11 +28,71 @@ export class App implements OnInit {
 
   constructor(
     private electronService: ElectronService,
+    private citadelSocket: CitadelSocketService,
     private cdr: ChangeDetectorRef,
   ) {}
 
   ngOnInit() {
+    this.citadelSocket.setChangeListener(() => this.cdr.detectChanges());
+    if (this.actoToken) {
+      void this.connectSocket();
+    }
     this.updateScreenCount();
+  }
+
+  ngOnDestroy() {
+    this.citadelSocket.disconnect();
+  }
+
+  get socketStatus() {
+    return this.citadelSocket.status;
+  }
+
+  get socketStatusMessage() {
+    return this.citadelSocket.statusMessage;
+  }
+
+  get lastSocketEventName() {
+    return this.citadelSocket.lastEventName;
+  }
+
+  get lastSocketEventAt() {
+    return this.citadelSocket.lastEventAt;
+  }
+
+  get lastSocketEventPayload() {
+    return this.citadelSocket.lastEventPayload;
+  }
+
+  get timetrackerState() {
+    return this.citadelSocket.timetrackerState;
+  }
+
+  get statusNotice() {
+    return this.citadelSocket.statusNotice;
+  }
+
+  formatStatus(status: string | undefined): string {
+    return status ? formatTimetrackerStatus(status) : '—';
+  }
+
+  reconnectSocket() {
+    void this.connectSocket();
+  }
+
+  private async connectSocket(): Promise<void> {
+    this.citadelSocket.disconnect();
+    localStorage.setItem('acto-token', this.actoToken.trim());
+
+    await this.citadelSocket.connect({
+      isElectron: this.electronService.isElectron,
+      actoToken: this.actoToken,
+      setAuthCookie: this.electronService.isElectron
+        ? (url, name, value) => this.electronService.setAuthCookie(url, name, value)
+        : undefined,
+    });
+
+    this.cdr.detectChanges();
   }
 
   async updateScreenCount() {

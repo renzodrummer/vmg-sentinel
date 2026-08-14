@@ -1,0 +1,19 @@
+sequenceDiagram
+  autonumber
+  actor User
+  participant Portal as Web Portal
+  participant Sentinel as Sentinel Electron
+  participant Admin as admin-api
+  participant DB as MongoDB staff
+  participant Citadel as citadel-api
+
+  User->>Portal: Clicks Start or sets status Busy
+  Portal->>Admin: POST/PUT timetracker
+  Admin->>DB: Update staff document
+  Admin-->>Portal: REST response
+  DB-->>Citadel: Change stream event
+  Note over Citadel: Action resolution<br/>timelog_start set = started<br/>timelog_start unset = stopped<br/>status or break change = status_changed
+  Citadel->>Portal: timetracker:started to room staff:staffId
+  Citadel->>Sentinel: timetracker:started to room staff:staffId
+  Portal->>Portal: Update badge, timer, notice
+  Sentinel->>Sentinel: Update badge, timer, notice

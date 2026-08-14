@@ -1,0 +1,31 @@
+flowchart TB
+  subgraph clients["Clients"]
+    subgraph web["Web Admin Portal / Browser"]
+      WebPage["web/timetracker-socket.html<br/>inline socket client<br/>clientType: web"]
+    end
+
+    subgraph electron["Sentinel Electron App"]
+      Renderer["Angular renderer<br/>App component + CitadelSocketService<br/>clientType: electron"]
+      Preload["electron/preload.js<br/>contextBridge: electronAPI"]
+      Main["electron/main.js<br/>session cookies + dev cert trust"]
+      Renderer -->|"setAuthCookie via ElectronService"| Preload
+      Preload -->|"ipcRenderer.invoke set-auth-cookie"| Main
+    end
+  end
+
+  subgraph backend["Backend Services"]
+    AdminApi["admin-api<br/>REST - the only writer<br/>GET /auth, timetracker mutations"]
+    Citadel["citadel-api<br/>Socket.IO - listen only<br/>JWT validation + room scoping"]
+  end
+
+  DB[("MongoDB<br/>staff collection<br/>single source of truth")]
+
+  WebPage -->|"REST mutations + session probe<br/>credentials: include"| AdminApi
+  Renderer -->|"REST mutations"| AdminApi
+  AdminApi -->|"write"| DB
+  DB -->|"change stream"| Citadel
+  Citadel -->|"emit to room staff:staffId"| WebPage
+  Citadel -->|"emit to room staff:staffId"| Renderer
+
+  WebPage -.->|"handshake: withCredentials true<br/>acto cookie"| Citadel
+  Renderer -.->|"handshake: withCredentials true<br/>acto cookie"| Citadel

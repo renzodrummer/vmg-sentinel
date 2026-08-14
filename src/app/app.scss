@@ -54,3 +54,162 @@
   align-items: center;
   margin-bottom: 15px;
 }
+
+.socket-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.socket-cookie-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+}
+
+.socket-cookie-field input {
+  padding: 8px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-family: monospace;
+}
+
+.socket-status.connected {
+  color: #198754;
+}
+
+.socket-status.connecting {
+  color: #856404;
+}
+
+.socket-status.error {
+  color: #dc3545;
+}
+
+.socket-status.disconnected {
+  color: #6c757d;
+}
+
+.socket-event pre {
+  background: #f4f4f4;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 0.8rem;
+  overflow: auto;
+  max-height: 200px;
+}
+
+.socket-hint {
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+.timetracker-live {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.timetracker-live-label {
+  margin: 0 0 8px;
+  font-size: 0.85rem;
+  color: #6c757d;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.timetracker-status-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #fff;
+  background: #6c757d;
+}
+
+.status-badge.online {
+  background: #198754;
+}
+
+.status-badge.busy {
+  background: #dc3545;
+}
+
+.status-badge.not_working,
+.status-badge.offline {
+  background: #6c757d;
+}
+
+.status-badge.bio_break,
+.status-badge.lunch_break,
+.status-badge.unpaid_break {
+  background: #fd7e14;
+}
+
+.status-badge.in_a_meeting,
+.status-badge.official_business {
+  background: #0d6efd;
+}
+
+.tracking-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: #e9ecef;
+  color: #495057;
+}
+
+.tracking-badge.active {
+  background: #d1e7dd;
+  color: #0f5132;
+}
+
+.timetracker-meta {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: #495057;
+}
+
+.status-change-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #cff4fc;
+  border: 1px solid #9eeaf9;
+  color: #055160;
+  animation: notice-in 0.25s ease-out;
+}
+
+.status-change-notice .notice-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  opacity: 0.85;
+}
+
+@keyframes notice-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

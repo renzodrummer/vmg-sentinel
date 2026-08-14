@@ -9,6 +9,7 @@ const {
   Menu,
   Notification,
   dialog,
+  session,
 } = require('electron');
 
 const path = require('node:path');
@@ -17,12 +18,45 @@ const os = require('node:os');
 const sharp = require('sharp');
 const { Worker } = require('node:worker_threads');
 
+const trustedDevHostnames = [
+  'admin-api-local.vmg-portal.com',
+  'citadel-api-local.vmg-portal.com',
+  'admin-local.vmg-portal.com',
+];
+
+if (!app.isPackaged) {
+  // Required for WebSocket (wss://) — certificate-error alone does not cover it.
+  app.commandLine.appendSwitch('ignore-certificate-errors');
+
+  app.on('certificate-error', (event, _webContents, url, _error, _certificate, callback) => {
+    const isTrusted = trustedDevHostnames.some((hostname) => url.includes(hostname));
+    if (isTrusted) {
+      event.preventDefault();
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+}
+
 let autoCaptureInterval = null;
 let autoCaptureTimeout = null;
 
 let writeStream = null;
 let tempFilePath = null;
 let recordingWidgetWindow = null;
+
+function toggleDevTools(browserWindow) {
+  if (!browserWindow?.webContents) {
+    return;
+  }
+
+  if (browserWindow.webContents.isDevToolsOpened()) {
+    browserWindow.webContents.closeDevTools();
+  } else {
+    browserWindow.webContents.openDevTools({ mode: 'detach' });
+  }
+}
 
 function processImageInWorker(imgBuffer) {
   return new Promise((resolve, reject) => {
@@ -42,45 +76,96 @@ function processImageInWorker(imgBuffer) {
   });
 }
 
+async function captureAllDisplaysAsSingleImage() {
+  const BLUR_AMOUNT = 15;
+  const JPEG_QUALITY = 80;
+
+  const displays = screen.getAllDisplays();
+
+  if (displays.length === 0) {
+    throw new Error('No displays detected');
+  }
+
+  const maxWidth = Math.max(...displays.map((d) => d.size.width));
+  const maxHeight = Math.max(...displays.map((d) => d.size.height));
+
+  const screens = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: {
+      width: maxWidth,
+      height: maxHeight,
+    },
+    fetchWindowIcons: false,
+  });
+
+  const minX = Math.min(...displays.map((d) => d.bounds.x));
+  const minY = Math.min(...displays.map((d) => d.bounds.y));
+  const maxX = Math.max(...displays.map((d) => d.bounds.x + d.bounds.width));
+  const maxY = Math.max(...displays.map((d) => d.bounds.y + d.bounds.height));
+  const totalWidth = maxX - minX;
+  const totalHeight = maxY - minY;
+
+  const compositeInputs = [];
+
+  for (const display of displays) {
+    const source =
+      screens.find((s) => s.display_id === display.id.toString()) ??
+      screens[displays.indexOf(display)];
+
+    if (!source) {
+      console.warn(`No capture source found for display ${display.id}`);
+      continue;
+    }
+
+    let imgBuffer = source.thumbnail.toPNG();
+
+    imgBuffer = await sharp(imgBuffer)
+      .resize(display.bounds.width, display.bounds.height, { fit: 'fill' })
+      .png()
+      .toBuffer();
+
+    compositeInputs.push({
+      input: imgBuffer,
+      left: display.bounds.x - minX,
+      top: display.bounds.y - minY,
+    });
+  }
+
+  if (compositeInputs.length === 0) {
+    throw new Error('Failed to capture any display');
+  }
+
+  const compositedBuffer = await sharp({
+    create: {
+      width: totalWidth,
+      height: totalHeight,
+      channels: 3,
+      background: { r: 0, g: 0, b: 0 },
+    },
+  })
+    .composite(compositeInputs)
+    .png()
+    .toBuffer();
+  const mergedBuffer = await sharp(compositedBuffer)
+    .blur(BLUR_AMOUNT)
+    .jpeg({ quality: JPEG_QUALITY })
+    .toBuffer();
+
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = `screenshot-all-${timestamp}.jpg`;
+  const filePath = path.join(os.homedir(), fileName);
+
+  await fs.promises.writeFile(filePath, mergedBuffer);
+
+  return filePath;
+}
 async function executeSecureCapture() {
   try {
-    const displays = screen.getAllDisplays();
-    const maxWidth = Math.max(...displays.map((d) => d.size.width));
-    const maxHeight = Math.max(...displays.map((d) => d.size.height));
-
-    const screens = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: {
-        width: maxWidth,
-        height: maxHeight,
-      },
-      fetchWindowIcons: false,
-    });
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-    await Promise.all(
-      screens.map(async (source, index) => {
-        try {
-          let imgBuffer = source.thumbnail.toPNG();
-
-          imgBuffer = await processImageInWorker(imgBuffer);
-
-          const fileName = `screenshot-screen${index + 1}-${timestamp}.jpg`;
-          const filePath = path.join(os.homedir(), fileName);
-
-          await fs.promises.writeFile(filePath, imgBuffer);
-          imgBuffer = null;
-        } catch (processingError) {
-          console.error(processingError);
-        }
-      }),
-    );
-
+    await captureAllDisplaysAsSingleImage();
     if (Notification.isSupported()) {
       new Notification({
         title: 'Screens Captured',
-        body: 'Secure screenshots of all monitors were recorded.',
+        body: 'Secure screenshot of all monitors was saved as one file.',
         icon: path.join(__dirname, 'assets/camera.ico'),
       }).show();
     }
@@ -90,14 +175,31 @@ async function executeSecureCapture() {
 }
 
 app.whenReady().then(() => {
+  if (!app.isPackaged) {
+    session.defaultSession.setCertificateVerifyProc((request, callback) => {
+      if (trustedDevHostnames.includes(request.hostname)) {
+        callback(0);
+        return;
+      }
+      callback(-2);
+    });
+  }
+
   const window = new BrowserWindow({
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      devTools: true,
     },
     frame: false,
     show: false,
+  });
+
+  window.webContents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown' && input.key === 'F12') {
+      toggleDevTools(window);
+    }
   });
 
   const iconPath = path.join(__dirname, 'assets/camera.ico');
@@ -112,6 +214,11 @@ app.whenReady().then(() => {
 
   const menuTemplate = [
     {
+      label: 'Toggle Developer Tools',
+      click: () => toggleDevTools(window),
+    },
+    { type: 'separator' },
+    {
       label: 'Quit',
       click: () => {
         app.quit();
@@ -123,6 +230,12 @@ app.whenReady().then(() => {
   tray.setContextMenu(contextMenu);
 
   window.loadFile(path.join(__dirname, '../dist/sentinel/browser/index.html'));
+
+  window.webContents.once('did-finish-load', () => {
+    if (!app.isPackaged) {
+      window.webContents.openDevTools({ mode: 'detach' });
+    }
+  });
 
   ipcMain.on('capture-screen', async () => {
     await executeSecureCapture();
@@ -162,38 +275,30 @@ app.whenReady().then(() => {
     return screen.getAllDisplays().length;
   });
 
+  ipcMain.handle('set-auth-cookie', async (_event, url, name, value) => {
+    if (typeof url !== 'string' || typeof name !== 'string' || typeof value !== 'string') {
+      throw new Error('Invalid cookie parameters');
+    }
+
+    await session.defaultSession.cookies.set({
+      url,
+      name,
+      value,
+      secure: url.startsWith('https'),
+      httpOnly: true,
+      sameSite: 'no_restriction',
+    });
+  });
+
   // multi screen capture
 
-  ipcMain.on('capture-multi-screen', async (event) => {
-    const displays = screen.getAllDisplays();
-    const maxWidth = Math.max(...displays.map((d) => d.size.width));
-    const maxHeight = Math.max(...displays.map((d) => d.size.height));
-
-    const screens = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: maxWidth, height: maxHeight },
-      fetchWindowIcons: false,
-    });
-
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-    await Promise.all(
-      screens.map(async (source, index) => {
-        let imgBuffer = source.thumbnail.toPNG();
-        try {
-          imgBuffer = await processImageInWorker(imgBuffer);
-
-          const fileName = `screenshot-screen${index + 1}-${timestamp}.jpg`;
-          const filePath = path.join(os.homedir(), fileName);
-
-          await fs.promises.writeFile(filePath, imgBuffer);
-          shell.openExternal(`file://${filePath}`);
-          imgBuffer = null;
-        } catch (processingError) {
-          console.error(`Failed to process image:`, processingError);
-        }
-      }),
-    );
+  ipcMain.on('capture-multi-screen', async () => {
+    try {
+      const filePath = await captureAllDisplaysAsSingleImage();
+      shell.openExternal(`file://${filePath}`);
+    } catch (error) {
+      console.error('Failed to capture all screens:', error);
+    }
   });
 
   // active screen
