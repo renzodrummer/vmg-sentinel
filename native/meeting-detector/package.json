@@ -1,0 +1,23 @@
+{
+    "name": "meeting-detector",
+    "version": "1.0.0",
+    "main": "index.js",
+    "napi": {
+      "name": "meeting-detector",
+      "triples": {
+        "defaults": false,
+        "additional": [
+          "x86_64-pc-windows-msvc",
+          "aarch64-pc-windows-msvc",
+          "x86_64-apple-darwin",
+          "aarch64-apple-darwin"
+        ]
+      }
+    },
+    "scripts": {
+      "build": "napi build --platform --release"
+    },
+    "devDependencies": {
+      "@napi-rs/cli": "^2.18.4"
+    }
+  }

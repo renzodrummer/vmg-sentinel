@@ -1,36 +1,56 @@
 <div class="app-container">
-  <section class="feature-section">
-    <h3>Realtime — Citadel Socket</h3>
-    <div class="socket-panel">
-      <p><strong>URL:</strong> {{ citadelApiUrl }}</p>
-      <label class="socket-cookie-field">
-        <span>Auth cookie (stored in Electron session, sent via withCredentials)</span>
-        <code>{{ actoCookieName }}=&lt;token&gt;</code>
-        <input
-          type="text"
-          [(ngModel)]="actoToken"
-          placeholder="Paste acto JWT (same value as Postman acto variable)"
-          autocomplete="off"
-        />
-      </label>
-      <p>
-        <strong>Status:</strong>
-        <span class="socket-status" [class]="socketStatus">{{ socketStatusMessage }}</span>
-      </p>
-      <button type="button" (click)="reconnectSocket()">Connect</button>
-    </div>
+  <section class="policy-banner" *ngIf="policyStatus as policy" [class.active]="policy.enforcing">
+    <strong>{{
+      policy.enforcing
+        ? 'Blocked by company policy while you are on the clock'
+        : policy.session_active && policy.policy_mode === 'audit'
+          ? 'Company policy is in audit — nothing is blocked'
+          : policy.session_active && policy.policy_mode === 'block'
+            ? 'Work session is on — deny list should be enforced'
+            : 'Site and app blocking is idle'
+    }}</strong>
+    <p>
+      Session {{ policy.session_active ? 'on' : 'off' }}
+      · {{ policy.session_reason || 'idle' }}
+      · mode {{ policy.policy_mode || 'none' }}
+      · engine {{ policy.engine || 'none' }}
+      · build {{ policy.helper_build || 'unknown' }}
+      · helper {{ policy.privilege || 'unknown' }}
+    </p>
+    <p *ngIf="policy.privilege === 'user' || (!policy.privilege && policy.needs_service)" class="policy-banner-warn">
+      The policy helper service is not running. Reinstall Sentinel so Windows can register <code>VMGSentinelHelper</code>.
+    </p>
+    <p *ngIf="policy.last_error" class="policy-banner-warn">{{ policy.last_error }}</p>
+  </section>
 
-    <div class="timetracker-live" *ngIf="timetrackerState as state">
-      <p class="timetracker-live-label">Live timetracker state</p>
+  <section class="feature-section">
+    <div class="timetracker-live">
+      <p class="timetracker-live-label">Meeting detection</p>
       <div class="timetracker-status-row">
-        <span class="status-badge" [class]="state.status">{{ formatStatus(state.status) }}</span>
-        <span class="tracking-badge" [class.active]="state.is_tracking">
-          {{ state.is_tracking ? 'Tracking' : 'Not tracking' }}
+        <span
+          class="status-badge"
+          [class.in_a_meeting]="meetingDebug?.is_in_meeting"
+          [class.meeting-idle]="!meetingDebug?.is_in_meeting"
+        >
+          {{ meetingDebug?.is_in_meeting ? 'In a Meeting' : 'Not in a meeting' }}
         </span>
       </div>
       <p class="timetracker-meta">
-        Shift start: {{ state.timelog_start || '—' }}
+        Local score {{ meetingDebug?.score ?? 0 }}
+        · session clue {{ meetingDebug?.has_session_clue ? 'yes' : 'no' }}
       </p>
+      <details class="meeting-debug-details" *ngIf="meetingDebug">
+        <summary>Debug payload</summary>
+        <pre>{{ meetingDebug | json }}</pre>
+      </details>
+    </div>
+
+    <div class="status-change-notice" *ngIf="meetingNotice as mNotice">
+      <div class="pulse-dot"></div>
+      <div>
+        <strong>{{ mNotice.message }}</strong>
+        <span class="notice-meta">local meeting · {{ mNotice.at }}</span>
+      </div>
     </div>
 
     <div class="status-change-notice" *ngIf="statusNotice as notice">
@@ -45,14 +65,6 @@
       <p><strong>Last event:</strong> {{ lastSocketEventName }} at {{ lastSocketEventAt }}</p>
       <pre>{{ lastSocketEventPayload }}</pre>
     </div>
-    <p class="socket-hint" *ngIf="!lastSocketEventName">
-      Listening for timetracker socket events…
-    </p>
-  </section>
-
-  <hr />
-
-  <section class="feature-section">
     <h3>1. Time Tracker</h3>
     <div class="time-display">
       <p id="screen-info">{{ screenInfoText }}</p>
@@ -108,4 +120,48 @@
 
     <video #previewVideo muted style="display: none"></video>
   </section>
+
+  <section class="feature-section">
+    <h3>Realtime — Citadel Socket</h3>
+    <div class="socket-panel">
+      <p><strong>URL:</strong> {{ citadelApiUrl }}</p>
+      <label class="socket-cookie-field">
+        <span>Auth cookie (stored in Electron session, sent via withCredentials)</span>
+        <code>{{ actoCookieName }}=&lt;token&gt;</code>
+        <input type="text" [(ngModel)]="actoToken" placeholder="Paste acto JWT (same value as Postman acto variable)"
+          autocomplete="off" />
+      </label>
+      <p>
+        <strong>Status:</strong>
+        <span class="socket-status" [class]="socketStatus">{{ socketStatusMessage }}</span>
+      </p>
+      <button type="button" (click)="reconnectSocket()">Connect</button>
+    </div>
+
+    <div class="timetracker-live" *ngIf="timetrackerState as state">
+      <p class="timetracker-live-label">Live timetracker state</p>
+      <div class="timetracker-status-row">
+        <span class="status-badge" [class]="state.status">{{ formatStatus(state.status) }}</span>
+        <span class="tracking-badge" [class.active]="state.is_tracking">
+          {{ state.is_tracking ? 'Tracking' : 'Not tracking' }}
+        </span>
+        <span class="status-badge" [class.in_a_meeting]="meetingDebug?.is_in_meeting"
+          [class.meeting-idle]="!!meetingDebug && !meetingDebug.is_in_meeting">
+          {{ meetingDebug?.is_in_meeting ? 'In a Meeting' : 'Not in a meeting' }}
+        </span>
+      </div>
+      <p class="timetracker-meta">
+        Shift start: {{ state.timelog_start || '—' }}
+      </p>
+      <p class="timetracker-meta" *ngIf="meetingDebug">
+        Local score {{ meetingDebug.score }}
+        · session clue {{ meetingDebug.has_session_clue ? 'yes' : 'no' }}
+        · {{ meetingDebug.timestamp }}
+      </p>
+    </div>
+    <p class="socket-hint" *ngIf="!lastSocketEventName">
+      Listening for timetracker socket events…
+    </p>
+  </section>
+  <hr />
 </div>

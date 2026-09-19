@@ -2,6 +2,7 @@
 
 # Compiled output
 /dist
+/dist-app
 /tmp
 /out-tsc
 /bazel-out
@@ -42,3 +43,8 @@ __screenshots__/
 # System files
 .DS_Store
 Thumbs.db
+
+# Native build artifacts
+native/*/target/
+native/policy-helper/keys/*.sk
+.policy-helper-state/

@@ -11,7 +11,12 @@
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
-    "serve:web": "npx --yes serve web -p 5500"
+    "serve:web": "npx --yes serve web -p 5500",
+    "build:helper": "node scripts/stage-policy-helper.js",
+    "dist": "npm run build:helper && ng build && electron-builder --win",
+    "dist:dir": "npm run build:helper && ng build && electron-builder --win --dir",
+    "test:meeting": "vitest run electron/services/scoring-engine.spec.js electron/services/idle-detector-service.spec.js",
+    "test:policy": "vitest run --config electron/vitest.config.mjs electron/services/policy-document.spec.js electron/services/policy-helper-client.spec.js electron/services/work-session.spec.js electron/services/policy-fetch.spec.js electron/services/dev-block-policy.spec.js"
   },
   "build": {
     "appId": "com.vmg.sentinel",
@@ -19,14 +24,27 @@
     "compression": "maximum",
     "asar": true,
     "directories": {
-      "output": "dist-app"
+      "output": "dist-app",
+      "buildResources": "build"
     },
     "files": [
       "package.json",
-      "dist/electron/**/*",
-      "dist/sentinel/browser/**/*",
+      "electron/**/*.js",
+      "electron/assets/**/*",
+      "dist/sentinel/**/*",
+      "!electron/**/*.spec.js",
       "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
       "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}"
+    ],
+    "extraResources": [
+      {
+        "from": "native/policy-helper/bin",
+        "to": "policy-helper",
+        "filter": [
+          "vmg-sentinel-helper.exe",
+          "vmg-sentinel-helper"
+        ]
+      }
     ],
     "mac": {
       "target": [
@@ -43,7 +61,9 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": true,
+      "allowElevation": true,
+      "include": "build/installer.nsh"
     }
   },
   "private": true,
@@ -66,6 +86,7 @@
     "@angular/cli": "^21.2.10",
     "@angular/compiler-cli": "^21.2.0",
     "electron": "^42.0.1",
+    "electron-builder": "^26.15.3",
     "jsdom": "^28.0.0",
     "nodemon": "^3.1.14",
     "prettier": "^3.8.1",

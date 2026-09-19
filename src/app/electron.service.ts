@@ -1,5 +1,5 @@
 import { Injectable } from '@angular/core';
-import { DesktopSource } from '../global';
+import { DesktopSource, MeetingDebugState, PolicyStatus } from '../global';
 
 @Injectable({
   providedIn: 'root',
@@ -64,5 +64,42 @@ export class ElectronService {
 
   async finishAndSaveRecording(): Promise<boolean> {
     return this.isElectron ? await window.electronAPI.stopAndSaveRecording() : false;
+  }
+
+  onMeetingState(callback: (state: MeetingDebugState) => void): () => void {
+    if (!this.isElectron) {
+      return () => undefined;
+    }
+    return window.electronAPI.onMeetingState(callback);
+  }
+
+  async getPolicyStatus(): Promise<PolicyStatus | null> {
+    if (!this.isElectron) {
+      return null;
+    }
+    return window.electronAPI.getPolicyStatus();
+  }
+
+  async setCitadelWorkSession(
+    payload: { is_tracking: boolean; status: string } | null,
+  ): Promise<PolicyStatus | null> {
+    if (!this.isElectron) {
+      return null;
+    }
+    return window.electronAPI.setCitadelWorkSession(payload);
+  }
+
+  async refreshCitadelPolicy(apiUrl: string): Promise<{ ok: boolean; code?: string } | null> {
+    if (!this.isElectron) {
+      return null;
+    }
+    return window.electronAPI.refreshCitadelPolicy({ apiUrl });
+  }
+
+  onPolicyStatus(callback: (status: PolicyStatus) => void): () => void {
+    if (!this.isElectron) {
+      return () => undefined;
+    }
+    return window.electronAPI.onPolicyStatus(callback);
   }
 }

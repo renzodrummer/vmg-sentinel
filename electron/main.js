@@ -10,6 +10,7 @@ const {
   Notification,
   dialog,
   session,
+  powerMonitor,
 } = require('electron');
 
 const path = require('node:path');
@@ -17,10 +18,26 @@ const fs = require('node:fs');
 const os = require('node:os');
 const sharp = require('sharp');
 const { Worker } = require('node:worker_threads');
+const { IdleDetectorService } = require('./services/idle-detector-service');
+const { MeetingDetectorService } = require('./services/meeting-detector-service');
+const {
+  PolicyHelperClient,
+  defaultHelperPath,
+  EXPECTED_HELPER_BUILD,
+  HELPER_SERVICE_NAME,
+} = require('./services/policy-helper-client');
+const {
+  createDefaultWorkPolicy,
+  shouldApplyLocalDevPolicy,
+  shouldSpawnHelper,
+} = require('./services/dev-block-policy');
+const { fetchCitadelPolicy } = require('./services/policy-fetch');
+const { isWorkSessionActive, workSessionReason } = require('./services/work-session');
 
 const trustedDevHostnames = [
   'admin-api-local.vmg-portal.com',
   'citadel-api-local.vmg-portal.com',
+  'citadel-api-dev.vmg-portal.com',
   'admin-local.vmg-portal.com',
 ];
 
@@ -196,6 +213,160 @@ app.whenReady().then(() => {
     show: false,
   });
 
+  const idleDetector = new IdleDetectorService({
+    thresholdSec: 60,
+    onIdle: () => window.webContents.send('idle:state', { is_idle: true }),
+    onActive: () => window.webContents.send('idle:state', { is_idle: false }),
+  });
+  
+  const meetingDetector = new MeetingDetectorService({
+    idleDetector,
+    logPath: path.join(app.getPath('userData'), 'meeting-log.jsonl'),
+    onState: (state) => {
+      if (!window.isDestroyed()) {
+        window.webContents.send('meeting:state', state);
+      }
+    },
+  });
+
+  const policyHelper = new PolicyHelperClient({
+    helperPath: defaultHelperPath(app.isPackaged, process.resourcesPath),
+    storeDir: path.join(app.getPath('userData'), 'policy-helper'),
+    pipeName: 'vmg-sentinel-helper',
+  });
+  let localTracking = false;
+  let citadelSession = null;
+  let lastPolicyStatus = null;
+
+  async function pushWorkSession() {
+    const active = isWorkSessionActive({ localTracking, citadel: citadelSession });
+    const reason = workSessionReason({ localTracking, citadel: citadelSession });
+    try {
+      await applyLocalDevPolicyIfNeeded();
+      const response = await policyHelper.setSession(active, reason);
+      lastPolicyStatus = response.result ?? response;
+      if (!window.isDestroyed()) {
+        window.webContents.send('policy:status', lastPolicyStatus);
+      }
+    } catch (error) {
+      console.warn('[policy-helper] SetSession failed', error.message);
+    }
+  }
+
+  async function applyLocalDevPolicyIfNeeded(_status) {
+    if (!shouldApplyLocalDevPolicy({ isPackaged: app.isPackaged })) {
+      return;
+    }
+    try {
+      const current = (await policyHelper.getStatus()).result;
+      if (current?.policy_loaded) {
+        return;
+      }
+    } catch {
+      // Helper may not be ready; ApplyPolicy will fail loudly if so.
+    }
+    const applied = await policyHelper.applyPolicy(createDefaultWorkPolicy());
+    if (applied && applied.ok === false) {
+      throw new Error(applied.error?.message || 'ApplyPolicy failed');
+    }
+    console.log('[policy-helper] applied local deny-list policy');
+  }
+
+  async function attachPolicyHelper() {
+    const helperPath = defaultHelperPath(app.isPackaged, process.resourcesPath);
+    try {
+      const existing = await policyHelper.getStatusWithRetry(30, 200);
+      console.log('[policy-helper] attached to existing helper', existing);
+      const result = existing?.result ?? existing ?? {};
+      if (result.privilege === 'user') {
+        console.warn(
+          '[policy-helper] attached to a user-level helper; the LocalSystem service is not on the pipe',
+        );
+      }
+      if (!policyHelper.isCurrentBuild(existing)) {
+        const last_error = app.isPackaged
+          ? `Old helper is on the pipe (build ${result.helper_build || 'unknown'}). Reinstall Sentinel so ${HELPER_SERVICE_NAME} is updated to ${EXPECTED_HELPER_BUILD}.`
+          : `Old helper is on the pipe (build ${result.helper_build || 'unknown'}). Stop ${HELPER_SERVICE_NAME} / end vmg-sentinel-helper.exe, then run "${helperPath}" --install`;
+        console.warn(`[policy-helper] ${last_error}`);
+        lastPolicyStatus = { ...result, last_error, needs_service: true };
+        if (!window.isDestroyed()) {
+          window.webContents.send('policy:status', lastPolicyStatus);
+        }
+        return;
+      }
+      await applyLocalDevPolicyIfNeeded(existing);
+      lastPolicyStatus = (await policyHelper.getStatus()).result ?? result;
+      if (!window.isDestroyed()) {
+        window.webContents.send('policy:status', lastPolicyStatus);
+      }
+      return;
+    } catch {
+      // Helper is not running yet.
+    }
+    if (!shouldSpawnHelper({ isPackaged: app.isPackaged })) {
+      const last_error = app.isPackaged
+        ? `${HELPER_SERVICE_NAME} is not running. Reinstall Sentinel (per-machine) so the installer can register the policy helper.`
+        : `${HELPER_SERVICE_NAME} is not on the pipe. From an elevated prompt run: "${helperPath}" --install`;
+      console.warn(`[policy-helper] ${last_error}`);
+      lastPolicyStatus = {
+        enforcing: false,
+        session_active: false,
+        needs_service: true,
+        privilege: 'user',
+        last_error,
+      };
+      if (!window.isDestroyed()) {
+        window.webContents.send('policy:status', lastPolicyStatus);
+      }
+      return;
+    }
+    if (!policyHelper.start()) {
+      console.warn('[policy-helper] binary missing; GetStatus will fail until it is built');
+      return;
+    }
+    try {
+      const status = await policyHelper.getStatusWithRetry();
+      console.log('[policy-helper] status', status);
+      await applyLocalDevPolicyIfNeeded(status);
+    } catch (error) {
+      console.warn('[policy-helper] unavailable', error.message);
+    }
+  }
+
+  async function cookieHeaderFor(url) {
+    try {
+      const cookies = await session.defaultSession.cookies.get({ url });
+      return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join('; ');
+    } catch {
+      return '';
+    }
+  }
+
+  async function refreshCitadelPolicy(apiUrl) {
+    if (!apiUrl) {
+      return { ok: false, code: 'POLICY_FETCH_FAILED', message: 'missing api url' };
+    }
+    const result = await fetchCitadelPolicy({
+      apiUrl,
+      cookieHeader: await cookieHeaderFor(apiUrl),
+    });
+    if (result.ok) {
+      await policyHelper.applyPolicy(result.policy);
+    } else {
+      await applyLocalDevPolicyIfNeeded();
+    }
+    lastPolicyStatus = (await policyHelper.getStatus()).result ?? lastPolicyStatus;
+    if (!window.isDestroyed()) {
+      window.webContents.send('policy:status', lastPolicyStatus);
+    }
+    return result;
+  }
+
+  void attachPolicyHelper();
+  app.on('will-quit', () => {
+    policyHelper.stop();
+  });
+
   window.webContents.on('before-input-event', (_event, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') {
       toggleDevTools(window);
@@ -251,6 +422,11 @@ app.whenReady().then(() => {
 
     executeSecureCapture();
 
+    idleDetector.start();
+    meetingDetector.start();
+    localTracking = true;
+    void pushWorkSession();
+
     autoCaptureInterval = setInterval(() => {
       const randomDelayMs = Math.floor(Math.random() * intervalMs);
 
@@ -269,10 +445,40 @@ app.whenReady().then(() => {
       clearTimeout(autoCaptureTimeout);
       autoCaptureTimeout = null;
     }
+    meetingDetector.stop({ reason: 'privacy' });
+    idleDetector.stop();
+    localTracking = false;
+    void pushWorkSession();
   });
 
   ipcMain.handle('get-screen-count', () => {
     return screen.getAllDisplays().length;
+  });
+
+  ipcMain.handle('policy:get-status', async () => {
+    try {
+      const response = await policyHelper.getStatus();
+      lastPolicyStatus = response.result ?? response;
+      return lastPolicyStatus;
+    } catch (error) {
+      return lastPolicyStatus ?? {
+        last_error: error.message,
+        enforcing: false,
+        session_active: false,
+        needs_service: true,
+      };
+    }
+  });
+
+  ipcMain.handle('policy:set-citadel-session', async (_event, payload) => {
+    citadelSession = payload && typeof payload === 'object' ? payload : null;
+    await pushWorkSession();
+    return lastPolicyStatus;
+  });
+
+  ipcMain.handle('policy:refresh-citadel', async (_event, payload) => {
+    const apiUrl = payload && typeof payload.apiUrl === 'string' ? payload.apiUrl : '';
+    return refreshCitadelPolicy(apiUrl);
   });
 
   ipcMain.handle('set-auth-cookie', async (_event, url, name, value) => {

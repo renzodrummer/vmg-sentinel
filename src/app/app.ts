@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy, ChangeDetectorRef, ViewChild, ElementRef 
 import { ElectronService } from './electron.service';
 import { CitadelSocketService } from './citadel-socket.service';
 import { formatTimetrackerStatus } from './constants/timetracker-socket.constants';
-import { DesktopSource } from '../global';
+import { DesktopSource, MeetingDebugState, PolicyStatus } from '../global';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { environment } from '../environments/environment';
@@ -19,6 +19,12 @@ export class App implements OnInit, OnDestroy {
   citadelApiUrl = environment.citadelApiUrl;
   actoCookieName = environment.actoCookieName;
   actoToken = localStorage.getItem('acto-token') ?? '';
+  meetingDebug: MeetingDebugState | null = null;
+  meetingNotice: { message: string; at: string } | null = null;
+  meetingDebugExpanded = false;
+  policyStatus: PolicyStatus | null = null;
+  private offMeetingState: (() => void) | null = null;
+  private offPolicyStatus: (() => void) | null = null;
 
   @ViewChild('previewVideo') previewVideo!: ElementRef<HTMLVideoElement>;
   availableSources: DesktopSource[] = [];
@@ -33,14 +39,47 @@ export class App implements OnInit, OnDestroy {
   ) {}
 
   ngOnInit() {
-    this.citadelSocket.setChangeListener(() => this.cdr.detectChanges());
+    this.citadelSocket.setChangeListener(() => {
+      this.syncCitadelWorkSession();
+      this.cdr.detectChanges();
+    });
     if (this.actoToken) {
       void this.connectSocket();
     }
     this.updateScreenCount();
+  
+    this.offMeetingState = this.electronService.onMeetingState((state) => {
+      const wasInMeeting = this.meetingDebug?.is_in_meeting === true;
+      this.meetingDebug = state;
+  
+      if (state.is_in_meeting && !wasInMeeting) {
+        this.meetingNotice = {
+          message: 'Status changed to In a Meeting',
+          at: new Date().toLocaleTimeString(),
+        };
+      } else if (!state.is_in_meeting && wasInMeeting) {
+        this.meetingNotice = {
+          message: state.ended_by === 'privacy' ? 'Meeting ended (privacy)' : 'Meeting ended',
+          at: new Date().toLocaleTimeString(),
+        };
+      }
+  
+      this.cdr.detectChanges();
+    });
+
+    this.offPolicyStatus = this.electronService.onPolicyStatus((status) => {
+      this.policyStatus = status;
+      this.cdr.detectChanges();
+    });
+    void this.electronService.getPolicyStatus().then((status) => {
+      this.policyStatus = status;
+      this.cdr.detectChanges();
+    });
   }
 
   ngOnDestroy() {
+    this.offMeetingState?.();
+    this.offPolicyStatus?.();
     this.citadelSocket.disconnect();
   }
 
@@ -92,7 +131,16 @@ export class App implements OnInit, OnDestroy {
         : undefined,
     });
 
+    this.syncCitadelWorkSession();
+    void this.electronService.refreshCitadelPolicy(this.citadelApiUrl);
     this.cdr.detectChanges();
+  }
+
+  private syncCitadelWorkSession(): void {
+    const state = this.citadelSocket.timetrackerState;
+    void this.electronService.setCitadelWorkSession(
+      state ? { is_tracking: state.is_tracking, status: state.status } : null,
+    );
   }
 
   async updateScreenCount() {
