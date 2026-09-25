@@ -175,6 +175,22 @@ pub fn clear() -> Result<(), String> {
     Ok(())
 }
 
+/// Remove every VMG Sentinel firewall rule, including leftovers after uninstall.
+pub fn remove_all_sentinel_rules() {
+    let _ = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.Group -eq 'VMG Sentinel' -or $_.DisplayName -like 'VMG Sentinel *' } | Remove-NetFirewallRule -ErrorAction SilentlyContinue",
+        ])
+        .status();
+    if let Ok(mut names) = ADDED_RULES.lock() {
+        names.clear();
+    }
+    eprintln!("policy-helper: removed all VMG Sentinel firewall rules");
+}
+
 pub fn remove_named_sites(hosts: impl IntoIterator<Item = impl AsRef<str>>) {
     let Ok(policy) = policy() else {
         return;

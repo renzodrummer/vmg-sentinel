@@ -28,6 +28,7 @@ pub enum AppEngine {
     None,
     Audit,
     DeferredToWdac,
+    LaunchDeny,
     NetworkFilter,
     TerminateOptIn,
 }
@@ -84,7 +85,7 @@ pub fn decide_app_engine(should_block: bool, safety: &SafetySnapshot) -> AppEngi
     if safety.terminate_opt_in {
         return AppEngine::TerminateOptIn;
     }
-    AppEngine::NetworkFilter
+    AppEngine::LaunchDeny
 }
 
 impl SiteEngine {
@@ -104,6 +105,7 @@ impl AppEngine {
             Self::None => "none",
             Self::Audit => "audit",
             Self::DeferredToWdac => "wdac",
+            Self::LaunchDeny => "launch",
             Self::NetworkFilter => "wfp_app",
             Self::TerminateOptIn => "terminate_opt_in",
         }
@@ -140,7 +142,7 @@ mod tests {
     fn block_mode_uses_session_wfp() {
         let safety = base();
         assert_eq!(decide_site_engine(true, &safety), SiteEngine::IpFallback);
-        assert_eq!(decide_app_engine(true, &safety), AppEngine::NetworkFilter);
+        assert_eq!(decide_app_engine(true, &safety), AppEngine::LaunchDeny);
     }
 
     #[test]

@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Work-session blocking (helper fw-4)</title>
+  <style>
+    @page { size: Letter; margin: 0.6in; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+      color: #142033;
+      font-size: 11px;
+      line-height: 1.45;
+      margin: 0;
+    }
+    h1 { font-size: 22px; margin: 0 0 6px; }
+    h2 { font-size: 14px; margin: 18px 0 8px; }
+    p.lead { color: #4b5568; margin: 0 0 12px; }
+    .callout {
+      border-left: 4px solid #2563eb;
+      background: #eff6ff;
+      padding: 10px 12px;
+      margin: 12px 0;
+    }
+    .callout.warn {
+      border-left-color: #d97706;
+      background: #fffbeb;
+    }
+    .callout strong { display: block; margin-bottom: 4px; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      margin: 12px 0;
+    }
+    .stat {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 8px;
+      text-align: center;
+    }
+    .stat b { display: block; font-size: 15px; }
+    .stat span { color: #6b7280; font-size: 10px; }
+    .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .card {
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      padding: 10px 12px;
+    }
+    .card h3 { margin: 0 0 8px; font-size: 12px; }
+    code {
+      font-family: Consolas, ui-monospace, monospace;
+      background: #f3f4f6;
+      padding: 1px 5px;
+      border-radius: 3px;
+      font-size: 10px;
+    }
+    .pills { margin: 8px 0 0; }
+    .pill {
+      display: inline-block;
+      border: 1px solid #d1d5db;
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin: 0 6px 4px 0;
+      font-size: 10px;
+    }
+    .pill.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 4px; }
+    th, td { border: 1px solid #e5e7eb; padding: 5px 7px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; font-size: 10px; }
+    .tone-danger td:first-child { color: #b91c1c; font-weight: 600; }
+    .tone-warning td:first-child { color: #b45309; font-weight: 600; }
+    .flow {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+      margin: 10px 0 14px;
+    }
+    .box {
+      border: 1px solid #94a3b8;
+      background: #f8fafc;
+      border-radius: 6px;
+      padding: 8px 10px;
+      min-width: 92px;
+      text-align: center;
+      font-weight: 600;
+    }
+    .arrow { color: #2563eb; font-weight: 700; }
+    .meta { color: #6b7280; font-size: 10px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h1>Work-session blocking (helper fw-4)</h1>
+  <p class="lead">
+    Unelevated Electron sends signed policy and session on/off over a named pipe.
+    The LocalSystem helper enforces only while tracking is on: Firewall for sites,
+    AppLocker deny-list (Allow Everyone * plus listed denies) for app launch.
+  </p>
+
+  <div class="callout">
+    <strong>Two engines, one clock</strong>
+    Sites lose outbound connectivity (any browser or curl). Listed apps cannot
+    CreateProcess, and already-running matches are closed once. Stop Tracking
+    deletes both rule sets. AppLocker is never applied as deny-only — that fw-3
+    pattern locked Task Manager and other apps.
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b>Angular</b><span>Renderer UI</span></div>
+    <div class="stat"><b>Electron</b><span>Main, unelevated</span></div>
+    <div class="stat"><b>Rust</b><span>vmg-sentinel-helper</span></div>
+    <div class="stat"><b>fw-4</b><span>Firewall + safe AppLocker</span></div>
+  </div>
+
+  <h2>How layers communicate</h2>
+  <div class="flow">
+    <div class="box">Angular UI</div><span class="arrow">→</span>
+    <div class="box">Electron main</div><span class="arrow">→</span>
+    <div class="box">Named pipe</div><span class="arrow">→</span>
+    <div class="box">Helper fw-4</div>
+  </div>
+  <div class="flow">
+    <span></span>
+    <div class="box">Helper fw-4</div><span class="arrow">→</span>
+    <div class="box">Firewall (sites)</div><span class="arrow">→</span>
+    <div class="box">Chrome / curl</div>
+  </div>
+  <div class="flow">
+    <span></span>
+    <div class="box">Helper fw-4</div><span class="arrow">→</span>
+    <div class="box">AppLocker (apps)</div><span class="arrow">→</span>
+    <div class="box">Steam / Spotify</div>
+  </div>
+
+  <div class="cols">
+    <div class="card">
+      <h3>What each layer owns</h3>
+      <p><strong>Angular.</strong> Banner, Start/Stop Tracking. Never opens the pipe.</p>
+      <p><strong>Electron main.</strong> Work-session gate, Ed25519 policy, pipe client only.</p>
+      <p><strong>Helper.</strong> Verify policy, DNS, INetFw, AppLocker XML, one-shot close.</p>
+      <p><strong>OS.</strong> Firewall drops packets. AppLocker refuses launch.</p>
+    </div>
+    <div class="card">
+      <h3>IPC allowlist</h3>
+      <p>No RunCommand. A compromised UI must not get a SYSTEM shell.</p>
+      <p>
+        <code>ApplyPolicy</code>
+        <code>SetSession</code>
+        <code>GetStatus</code>
+        <code>GetRecentBlocks</code>
+        <code>ReportTamper</code>
+      </p>
+    </div>
+  </div>
+
+  <h2>Tech stack</h2>
+  <table>
+    <thead><tr><th>Layer</th><th>Stack</th></tr></thead>
+    <tbody>
+      <tr><td>UI</td><td>Angular 21 + TypeScript</td></tr>
+      <tr><td>Desktop</td><td>Electron 42 (main + preload)</td></tr>
+      <tr><td>Helper</td><td>Rust, windows 0.58, windows-service, tokio</td></tr>
+      <tr><td>Policy</td><td>JSON + Ed25519 (dalek / Node crypto)</td></tr>
+      <tr><td>IPC</td><td>Named pipe, length-prefixed JSON, SDDL</td></tr>
+      <tr><td>Sites</td><td>DNS → INetFw outbound RemoteAddresses</td></tr>
+      <tr><td>Apps</td><td>AppLocker allow-all + listed deny + one-shot close</td></tr>
+      <tr><td>Ship</td><td>electron-builder NSIS per-machine</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Session gate</h2>
+  <p>Enforcement requires helper LocalSystem (or admin), a signed policy in block mode, and an active work session.</p>
+  <div class="pills">
+    <span class="pill">session off → clear rules</span>
+    <span class="pill">policy missing → idle</span>
+    <span class="pill active">session + policy → fw + AppLocker</span>
+  </div>
+
+  <h2>Technical issues</h2>
+  <table>
+    <thead><tr><th>Issue</th><th>Why</th><th>What we do</th></tr></thead>
+    <tbody>
+      <tr class="tone-danger"><td>AppLocker missing (Home)</td><td>Application Identity / AppLocker not on the SKU</td><td>last_error; already-running apps still closed once; new launch may succeed</td></tr>
+      <tr class="tone-danger"><td>Leftover rules after uninstall</td><td>INetFw and AppLocker persist after the service is deleted</td><td>--clear-blocks / --uninstall wipe VMG Sentinel* rules</td></tr>
+      <tr class="tone-warning"><td>CDN / DoH miss</td><td>Chrome may use an IP the helper did not resolve</td><td>Extra host prefixes; still IP-based, not SNI</td></tr>
+      <tr class="tone-warning"><td>Wrong helper on the pipe</td><td>Old WFP binary or user-level spawn</td><td>Refuse attach unless helper_build is fw-4</td></tr>
+      <tr class="tone-warning"><td>Tracking on, nothing blocked</td><td>SetSession without ApplyPolicy</td><td>Apply local deny list if policy_loaded is false</td></tr>
+      <tr class="tone-warning"><td>Rename / portable exe</td><td>Default list is still *\steam.exe; Citadel can add hash/publisher</td><td>Helper emits FileHashRule / FilePublisherRule when policy includes them</td></tr>
+      <tr class="tone-danger"><td>Deny-only AppLocker (fw-3)</td><td>Enabled Exe collection with no Allow * default-denies the PC</td><td>fw-4 writes Allow Everyone * first; apply refuses without it</td></tr>
+      <tr><td>IT already has AppLocker</td><td>Merge/remove must not wipe their rules</td><td>Only add/remove rules named VMG Sentinel *; clear sets NotConfigured</td></tr>
+      <tr class="tone-warning"><td>SmartScreen on Setup.exe</td><td>Unsigned installer</td><td>More info → Run anyway until Authenticode</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    <strong>Out of scope</strong>
+    No TLS MITM, no hosts file, no IFEO, no WDAC XML deploy, no taskkill loop,
+    no macOS NEFilter yet. All-day “never run this exe” still belongs in
+    Intune/WDAC, not this session switch.
+  </div>
+
+  <p class="meta">
+    PDF counterpart of the Cursor canvas “Work-session blocking (helper fw-4)”.
+    Aligns with HELPER_BUILD fw-4. 23 September 2026.
+  </p>
+</body>
+</html>

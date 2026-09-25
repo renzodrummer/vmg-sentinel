@@ -1,4 +1,6 @@
 #[cfg(windows)]
+pub mod applocker;
+#[cfg(windows)]
 pub mod firewall;
 pub mod mde;
 pub mod plan;
@@ -99,6 +101,7 @@ pub fn apply_plan(plan: &EnforcePlan) -> EnforceReport {
 
     let apply_wfp = site_engine == SiteEngine::IpFallback
         || app_engine == AppEngine::NetworkFilter
+        || app_engine == AppEngine::LaunchDeny
         || app_engine == AppEngine::TerminateOptIn;
     if plan.should_audit() || !apply_wfp {
         let _ = platform_clear();
@@ -167,6 +170,9 @@ fn describe_layer(site: SiteEngine, app: AppEngine) -> &'static str {
     match (site, app) {
         (SiteEngine::IpFallback, _) => {
             "Windows Firewall outbound block of deny-list IPs (lifted when tracking stops)"
+        }
+        (_, AppEngine::LaunchDeny) => {
+            "AppLocker exe deny plus close already-running deny apps (lifted when tracking stops)"
         }
         (_, AppEngine::NetworkFilter) => {
             "session WFP app-id network block (no process terminate)"

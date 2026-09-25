@@ -1,6 +1,8 @@
 # Prompt: Implement system-wide site and app blocking
 
-Copy the block below into a new Agent session. The architecture spec is [`docs/system-wide-site-and-app-blocking.md`](../system-wide-site-and-app-blocking.md). Do not invent a different design.
+This file is the **original implementation prompt**. Shipped Windows behavior has moved on: Firewall IP blocks for sites, **AppLocker session-gated launch deny** for apps (not WDAC deploy). Treat [`work-session-site-and-app-blocking.md`](../work-session-site-and-app-blocking.md) as the runbook for what is in the tree today.
+
+Copy the block below into a new Agent session only if you are re-deriving from the original spec. The architecture spec is [`docs/system-wide-site-and-app-blocking.md`](../system-wide-site-and-app-blocking.md). Do not invent a different design.
 
 ---
 

@@ -2,7 +2,9 @@
 //! helper exits). Sites use resolved IPs. Apps use application-id network
 //! block. TerminateProcess is opt-in only.
 
-use crate::enforce::plan::{resolve_deny_hosts, EnforcePlan};
+use crate::enforce::plan::{
+    ips_fingerprint, paths_fingerprint, plan_fingerprint, resolve_deny_hosts, EnforcePlan,
+};
 use crate::enforce::safety::{AppEngine, SiteEngine};
 use crate::enforce::{rule_matches_process, EnforceReport};
 use sha2::{Digest, Sha256};
@@ -47,6 +49,71 @@ unsafe impl Send for Engine {}
 unsafe impl Sync for Engine {}
 
 static ENGINE: Mutex<Option<Engine>> = Mutex::new(None);
+static CLOSED_FOR_POLICY: Mutex<Option<u64>> = Mutex::new(None);
+static LAST_APPLIED: Mutex<Option<AppliedSnapshot>> = Mutex::new(None);
+
+struct AppliedSnapshot {
+    policy: String,
+    ips: String,
+    running_apps: String,
+    filters_added: u32,
+    apps_reconciled: u32,
+    last_error: Option<String>,
+}
+
+fn reset_last_applied() {
+    if let Ok(mut last) = LAST_APPLIED.lock() {
+        *last = None;
+    }
+}
+
+fn store_last_applied(snapshot: AppliedSnapshot) {
+    if let Ok(mut last) = LAST_APPLIED.lock() {
+        *last = Some(snapshot);
+    }
+}
+
+fn matching_running_paths(plan: &EnforcePlan) -> Vec<String> {
+    running_processes()
+        .into_iter()
+        .filter_map(|(_, path)| {
+            let hash = sha256_file(&path);
+            plan.apps_deny
+                .iter()
+                .any(|rule| rule_matches_process(rule, &path, hash.as_deref(), None))
+                .then_some(path)
+        })
+        .collect()
+}
+
+fn apply_firewall(
+    add_ip: bool,
+    add_apps: bool,
+    resolved: &[(String, std::net::IpAddr)],
+    running_paths: &[String],
+    report: &mut EnforceReport,
+) {
+    let _ = crate::enforce::firewall::clear();
+    if add_ip {
+        match crate::enforce::firewall::apply_sites(resolved) {
+            Ok(count) => report.filters_added += count,
+            Err(error) => report.last_error = Some(error),
+        }
+    }
+    if add_apps {
+        match crate::enforce::firewall::apply_apps(running_paths) {
+            Ok(count) => {
+                report.filters_added += count;
+                report.apps_reconciled += count;
+            }
+            Err(error) => {
+                if report.last_error.is_none() {
+                    report.last_error = Some(error);
+                }
+            }
+        }
+    }
+}
 
 pub fn apply(
     plan: &EnforcePlan,
@@ -54,57 +121,109 @@ pub fn apply(
     app_engine: AppEngine,
 ) -> Result<EnforceReport, String> {
     let add_ip = site_engine == SiteEngine::IpFallback;
-    let add_apps = app_engine == AppEngine::NetworkFilter || app_engine == AppEngine::TerminateOptIn;
-    let terminate = app_engine == AppEngine::TerminateOptIn;
+    let add_apps = matches!(
+        app_engine,
+        AppEngine::NetworkFilter | AppEngine::LaunchDeny | AppEngine::TerminateOptIn
+    );
+    let close_running = matches!(
+        app_engine,
+        AppEngine::LaunchDeny | AppEngine::TerminateOptIn
+    );
     let mut report = EnforceReport {
         needs_admin: !unsafe { IsUserAnAdmin().as_bool() },
         ..EnforceReport::default()
     };
 
     if !add_ip && !add_apps {
+        reset_last_applied();
         let _ = crate::enforce::firewall::clear();
+        crate::enforce::applocker::clear();
         let _ = clear_filters();
         return Ok(report);
     }
 
-    if add_ip || add_apps {
-        let _ = crate::enforce::firewall::clear();
-    }
+    let resolved = if add_ip {
+        resolve_deny_hosts(&plan.sites_deny)
+    } else {
+        Vec::new()
+    };
+    let running_paths = if add_apps {
+        matching_running_paths(plan)
+    } else {
+        Vec::new()
+    };
+    let policy = plan_fingerprint(plan);
+    let ips = ips_fingerprint(&resolved);
+    let running_apps = paths_fingerprint(&running_paths);
 
-    if add_ip {
-        let resolved = resolve_deny_hosts(&plan.sites_deny);
-        match crate::enforce::firewall::apply_sites(&resolved) {
-            Ok(count) => report.filters_added += count,
-            Err(error) => report.last_error = Some(error),
+    if let Ok(last) = LAST_APPLIED.lock() {
+        if let Some(prev) = last.as_ref() {
+            if prev.policy == policy
+                && prev.ips == ips
+                && prev.running_apps == running_apps
+                && prev.last_error.is_none()
+            {
+                eprintln!("policy-helper: reconcile unchanged, skip firewall/AppLocker apply");
+                report.filters_added = prev.filters_added;
+                report.apps_reconciled = prev.apps_reconciled;
+                return Ok(report);
+            }
+            if prev.policy == policy && prev.last_error.is_none() {
+                eprintln!(
+                    "policy-helper: reconcile policy unchanged; refresh firewall only (skip AppLocker)"
+                );
+                apply_firewall(add_ip, add_apps, &resolved, &running_paths, &mut report);
+                drop(last);
+                store_last_applied(AppliedSnapshot {
+                    policy,
+                    ips,
+                    running_apps,
+                    filters_added: report.filters_added,
+                    apps_reconciled: report.apps_reconciled,
+                    last_error: report.last_error.clone(),
+                });
+                return Ok(report);
+            }
         }
     }
-    if add_apps {
-        let paths: Vec<String> = running_processes()
-            .into_iter()
-            .filter_map(|(_, path)| {
-                let hash = sha256_file(&path);
-                plan.apps_deny
-                    .iter()
-                    .any(|rule| rule_matches_process(rule, &path, hash.as_deref(), None))
-                    .then_some(path)
-            })
-            .collect();
-        match crate::enforce::firewall::apply_apps(&paths) {
+
+    apply_firewall(add_ip, add_apps, &resolved, &running_paths, &mut report);
+    if matches!(
+        app_engine,
+        AppEngine::LaunchDeny | AppEngine::TerminateOptIn
+    ) {
+        match crate::enforce::applocker::apply(&plan.apps_deny) {
             Ok(count) => {
                 report.filters_added += count;
                 report.apps_reconciled += count;
             }
-            Err(error) => report.last_error = Some(error),
+            Err(error) => {
+                if report.last_error.is_none() {
+                    report.last_error = Some(error);
+                }
+            }
         }
     }
-
-    if terminate {
-        report.apps_reconciled += reconcile_apps(plan, &mut report);
+    if close_running {
+        report.apps_reconciled += close_running_once(plan, &mut report);
     }
+    store_last_applied(AppliedSnapshot {
+        policy,
+        ips,
+        running_apps,
+        filters_added: report.filters_added,
+        apps_reconciled: report.apps_reconciled,
+        last_error: report.last_error.clone(),
+    });
     Ok(report)
 }
 
 pub fn clear() -> Result<(), String> {
+    reset_last_applied();
+    if let Ok(mut once) = CLOSED_FOR_POLICY.lock() {
+        *once = None;
+    }
+    crate::enforce::applocker::clear();
     let firewall_error = crate::enforce::firewall::clear().err();
     let wfp_error = clear_filters().err();
     match (firewall_error, wfp_error) {
@@ -301,23 +420,23 @@ fn add_filter(
     Ok(id)
 }
 
-fn reconcile_apps(plan: &EnforcePlan, report: &mut EnforceReport) -> u32 {
-    let mut engine = match ENGINE.lock() {
+fn close_running_once(plan: &EnforcePlan, report: &mut EnforceReport) -> u32 {
+    let mut once = match CLOSED_FOR_POLICY.lock() {
         Ok(guard) => guard,
         Err(_) => return 0,
     };
-    if let Some(existing) = engine.as_ref() {
-        if existing.killed_for == Some(plan.policy_version) {
-            return 0;
-        }
+    if *once == Some(plan.policy_version) {
+        return 0;
     }
 
-    let mut killed = 0u32;
+    let mut closed = 0u32;
     for (pid, path) in running_processes() {
+        if !crate::enforce::applocker::is_safe_deny_target(&path) {
+            continue;
+        }
         let hash = sha256_file(&path);
-        let publisher = None;
         let matched = plan.apps_deny.iter().any(|rule| {
-            rule_matches_process(rule, &path, hash.as_deref(), publisher)
+            rule_matches_process(rule, &path, hash.as_deref(), None)
         });
         if !matched {
             continue;
@@ -328,17 +447,14 @@ fn reconcile_apps(plan: &EnforcePlan, report: &mut EnforceReport) -> u32 {
             actor: "helper".into(),
             process_path: path.clone(),
             hostname: String::new(),
-            action: "block".into(),
+            action: "close-running".into(),
         });
         if terminate_pid(pid) {
-            killed += 1;
+            closed += 1;
         }
     }
-
-    if let Some(engine) = engine.as_mut() {
-        engine.killed_for = Some(plan.policy_version);
-    }
-    killed
+    *once = Some(plan.policy_version);
+    closed
 }
 
 fn running_processes() -> Vec<(u32, String)> {

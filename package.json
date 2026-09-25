@@ -13,8 +13,9 @@
     "test": "ng test",
     "serve:web": "npx --yes serve web -p 5500",
     "build:helper": "node scripts/stage-policy-helper.js",
-    "dist": "npm run build:helper && ng build && electron-builder --win",
-    "dist:dir": "npm run build:helper && ng build && electron-builder --win --dir",
+    "verify:helper": "node scripts/verify-helper-safe.js",
+    "dist": "npm run build:helper && npm run verify:helper && ng build && electron-builder --win",
+    "dist:dir": "npm run build:helper && npm run verify:helper && ng build && electron-builder --win --dir",
     "test:meeting": "vitest run electron/services/scoring-engine.spec.js electron/services/idle-detector-service.spec.js",
     "test:policy": "vitest run --config electron/vitest.config.mjs electron/services/policy-document.spec.js electron/services/policy-helper-client.spec.js electron/services/work-session.spec.js electron/services/policy-fetch.spec.js electron/services/dev-block-policy.spec.js"
   },

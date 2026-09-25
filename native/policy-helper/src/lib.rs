@@ -12,8 +12,8 @@ pub mod ttl;
 #[cfg(windows)]
 pub mod service;
 
-/// Distinguishes this Windows Firewall build from older WFP-only helpers on the same pipe.
-pub const HELPER_BUILD: &str = "fw-1";
+/// Distinguishes this Windows Firewall build from older helpers on the same pipe.
+pub const HELPER_BUILD: &str = "fw-4";
 
 /// RFC 8032 test-vector 1 public key. Dev / unit tests only.
 pub const DEV_PUBLIC_KEY_HEX: &str =

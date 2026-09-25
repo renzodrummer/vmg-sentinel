@@ -2,7 +2,16 @@
 
 Design and implementation notes for blocking websites and native applications from an Electron desktop agent on **Windows** and **macOS**.
 
-This document captures the architecture, corporate standards, OS-native APIs, failed shortcuts, and a realistic assessment of a privileged-daemon + local-proxy + process-kill approach. It is a design reference, not a description of currently shipped code.
+This document captures the architecture, corporate standards, OS-native APIs, failed shortcuts, and a realistic assessment of a privileged-daemon + local-proxy + process-kill approach.
+
+**Shipped Windows behavior** (helper `fw-4`, see [`work-session-blocking-full-documentation.md`](./work-session-blocking-full-documentation.md) and [`work-session-site-and-app-blocking.md`](./work-session-site-and-app-blocking.md)):
+
+- **Sites:** Windows Firewall outbound blocks of DNS-resolved deny-list IPs (not WFP SNI, not hosts file).
+- **Apps:** session-gated AppLocker **Allow Everyone `*`** plus **Exe Deny** (path, SHA-256, or publisher) and a **one-shot** close of already-running matches. Deny-only Enabled AppLocker (`fw-3`) is rejected — it default-denies the device. **WDAC XML is never deployed**.
+- **Reconcile:** 45s DNS refresh; Firewall/AppLocker rewrite is skipped when the deny lists and resolved IPs are unchanged.
+- Rules are lifted on **Stop Tracking**, **Quit** (`SetSession(false)`), helper exit, `--clear-blocks`, and `--uninstall`.
+- `npm run dist` runs `verify:helper` and will not package a pre-`fw-4` helper.
+- Electron stays unelevated and talks typed IPC only. macOS enforcement is still `TODO(platform)`.
 
 ---
 
@@ -534,3 +543,6 @@ Cover both the happy path and the bypasses the first design will hit.
 | 2026-09-18 | MDM is in-scope for extension approval and for tenants that already have Defender/Intune/Jamf. |
 | 2026-09-18 | Policy is server-signed; helper never accepts raw shell commands from Electron. |
 | 2026-09-18 | Ship audit mode before block mode. |
+| 2026-09-22 | Session-gated AppLocker exe deny + one-shot close running; sites stay INetFw IP blocks. WDAC remains detect-only. |
+| 2026-09-22 | Helper `fw-3`: dirty reconcile (skip unchanged apply) and AppLocker hash/publisher XML. DoH remains an IT/GPO concern, not helper registry writes. |
+| 2026-09-23 | Helper `fw-4`: AppLocker deny-list requires Allow Everyone `*`; apply refuses without it. Stop Tracking / Quit clear Exe to NotConfigured. Dist verifies staged exe. `unbrick-applocker.ps1` is lab recovery only. |

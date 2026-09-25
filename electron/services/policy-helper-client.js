@@ -5,7 +5,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const MAX_FRAME = 1_048_576;
-const EXPECTED_HELPER_BUILD = 'fw-1';
+const EXPECTED_HELPER_BUILD = 'fw-4';
 const HELPER_SERVICE_NAME = 'VMGSentinelHelper';
 
 function connectPath({ pipeName, storeDir }) {

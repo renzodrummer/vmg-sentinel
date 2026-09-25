@@ -150,6 +150,8 @@ pub fn install() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 }
 
 pub fn uninstall() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    crate::enforce::firewall::remove_all_sentinel_rules();
+    crate::enforce::applocker::clear();
     let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
     match manager.open_service(SERVICE_NAME, ServiceAccess::STOP | ServiceAccess::DELETE) {
         Ok(service) => {

@@ -45,6 +45,53 @@ impl EnforcePlan {
     }
 }
 
+/// Stable identity of the signed deny lists + session gate. Ignores issued_at / signature
+/// so a re-signed copy of the same lists does not force AppLocker PowerShell.
+pub fn plan_fingerprint(plan: &EnforcePlan) -> String {
+    let mut sites: Vec<String> = plan
+        .sites_deny
+        .iter()
+        .map(|site| site.to_ascii_lowercase())
+        .collect();
+    sites.sort();
+    sites.dedup();
+    let mut apps: Vec<String> = plan
+        .apps_deny
+        .iter()
+        .map(|rule| {
+            format!(
+                "{:?}:{}:{}",
+                rule.kind,
+                rule.alg.as_deref().unwrap_or(""),
+                rule.value.to_ascii_lowercase()
+            )
+        })
+        .collect();
+    apps.sort();
+    format!(
+        "block={}|audit={}|sites={}|apps={}",
+        plan.should_block(),
+        plan.should_audit(),
+        sites.join(","),
+        apps.join(",")
+    )
+}
+
+pub fn ips_fingerprint(resolved: &[(String, IpAddr)]) -> String {
+    let mut rows: Vec<String> = resolved
+        .iter()
+        .map(|(host, ip)| format!("{}|{ip}", host.to_ascii_lowercase()))
+        .collect();
+    rows.sort();
+    rows.join(";")
+}
+
+pub fn paths_fingerprint(paths: &[String]) -> String {
+    let mut rows: Vec<String> = paths.iter().map(|path| path.to_ascii_lowercase()).collect();
+    rows.sort();
+    rows.join(";")
+}
+
 pub fn host_matches_deny(hostname: &str, pattern: &str) -> bool {
     let host = hostname.trim_end_matches('.').to_ascii_lowercase();
     let needle = pattern.trim_end_matches('.').to_ascii_lowercase();
@@ -132,5 +179,32 @@ mod tests {
         audit.mode = PolicyMode::Audit;
         assert!(!audit.should_block());
         assert!(audit.should_audit());
+    }
+
+    #[test]
+    fn plan_fingerprint_ignores_policy_version() {
+        let mut plan = EnforcePlan {
+            policy_version: 1,
+            mode: PolicyMode::Block,
+            session_active: true,
+            expired: false,
+            sites_deny: vec!["Reddit.com".into(), "youtube.com".into()],
+            apps_deny: vec![],
+        };
+        let first = plan_fingerprint(&plan);
+        plan.policy_version = 9;
+        assert_eq!(first, plan_fingerprint(&plan));
+        plan.session_active = false;
+        assert_ne!(first, plan_fingerprint(&plan));
+    }
+
+    #[test]
+    fn ips_fingerprint_is_order_independent() {
+        use std::net::Ipv4Addr;
+        let a = Ipv4Addr::new(1, 2, 3, 4);
+        let b = Ipv4Addr::new(5, 6, 7, 8);
+        let left = ips_fingerprint(&[("Host".into(), a.into()), ("host".into(), b.into())]);
+        let right = ips_fingerprint(&[("host".into(), b.into()), ("host".into(), a.into())]);
+        assert_eq!(left, right);
     }
 }

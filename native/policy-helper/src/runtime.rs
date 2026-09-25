@@ -79,25 +79,8 @@ pub async fn run_helper(
 
     #[cfg(windows)]
     {
-        let leftover: Vec<String> = last_good
-            .as_ref()
-            .map(|doc| doc.sites.deny.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .chain([
-                "facebook.com".into(),
-                "youtube.com".into(),
-                "instagram.com".into(),
-                "tiktok.com".into(),
-                "reddit.com".into(),
-                "redditstatic.com".into(),
-                "redditmedia.com".into(),
-                "redd.it".into(),
-                "twitter.com".into(),
-                "x.com".into(),
-            ])
-            .collect();
-        crate::enforce::firewall::remove_named_sites(leftover);
+        crate::enforce::firewall::remove_all_sentinel_rules();
+        crate::enforce::applocker::clear();
     }
 
     eprintln!(

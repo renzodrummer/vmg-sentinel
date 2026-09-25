@@ -66,8 +66,6 @@ function createDefaultWorkPolicy() {
     },
     apps: {
       deny: [
-        { kind: 'path', value: 'discord.exe' },
-        { kind: 'path', value: 'Discord.exe' },
         { kind: 'path', value: 'steam.exe' },
         { kind: 'path', value: 'spotify.exe' },
       ],

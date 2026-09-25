@@ -10,6 +10,11 @@ fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if flags.iter().any(|arg| arg == "--uninstall") {
             return vmg_sentinel_helper::service::uninstall();
         }
+        if flags.iter().any(|arg| arg == "--clear-blocks") {
+            vmg_sentinel_helper::enforce::firewall::remove_all_sentinel_rules();
+            vmg_sentinel_helper::enforce::applocker::clear();
+            return Ok(());
+        }
         if flags.iter().any(|arg| arg == "--service") {
             return vmg_sentinel_helper::service::dispatch();
         }

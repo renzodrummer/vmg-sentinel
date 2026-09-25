@@ -363,8 +363,23 @@ app.whenReady().then(() => {
   }
 
   void attachPolicyHelper();
-  app.on('will-quit', () => {
-    policyHelper.stop();
+  let sessionClearedOnQuit = false;
+  app.on('before-quit', (event) => {
+    if (sessionClearedOnQuit) {
+      return;
+    }
+    event.preventDefault();
+    sessionClearedOnQuit = true;
+    localTracking = false;
+    policyHelper
+      .setSession(false, 'app-quit')
+      .catch((error) => {
+        console.warn('[policy-helper] SetSession(false) on quit failed', error.message);
+      })
+      .finally(() => {
+        policyHelper.stop();
+        app.quit();
+      });
   });
 
   window.webContents.on('before-input-event', (_event, input) => {

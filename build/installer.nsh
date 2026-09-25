@@ -21,10 +21,12 @@
 
 !macro customUnInstall
   IfFileExists "$INSTDIR\resources\policy-helper\vmg-sentinel-helper.exe" 0 helper_uninst_sc
+  nsExec::ExecToLog '"$INSTDIR\resources\policy-helper\vmg-sentinel-helper.exe" --clear-blocks'
   nsExec::ExecToLog '"$INSTDIR\resources\policy-helper\vmg-sentinel-helper.exe" --uninstall'
   Pop $0
   Goto helper_uninst_done
   helper_uninst_sc:
+    nsExec::ExecToLog 'powershell.exe -NoProfile -Command "Get-NetFirewallRule -DisplayGroup ''VMG Sentinel'' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue"'
     nsExec::ExecToLog 'sc.exe stop VMGSentinelHelper'
     nsExec::ExecToLog 'sc.exe delete VMGSentinelHelper'
   helper_uninst_done:
