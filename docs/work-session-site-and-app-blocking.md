@@ -9,12 +9,12 @@ Implementation prompt: [`prompts/implement-system-wide-blocking.md`](./prompts/i
 
 **Product rule:** listed sites and apps are considered only while the user is on the clock (Sentinel **Start Tracking**, or Citadel tracking with a working status). They are idle when tracking stops.
 
-**Current Windows engines (helper `fw-4`):** AppLocker is **deny-list** only (Allow Everyone `*` + deny listed apps). A deny-only Enabled collection bricks the device — that is why `fw-3` required a system restore on a test machine.
+**Current Windows engines (helper `fw-5`):** AppLocker is **deny-list** only. Exe allows `%WINDIR%\*`, `%PROGRAMFILES%\*`, and Everyone `*` plus listed denies. Appx allows all signed packaged apps (Settings / This PC → Properties). A deny-only Enabled Exe collection bricks the device (`fw-3`). Exe-only without Appx blocks Settings (`fw-4`).
 
 | Target | While tracking | When tracking stops |
 |---|---|---|
 | **Sites** | Windows Firewall outbound BLOCK of resolved deny-list IPs | Rules named `VMG Sentinel *` are deleted |
-| **Apps** | AppLocker **Allow Everyone `*`** plus **Exe Deny** for listed apps + one-shot close of already-running matches | Sentinel AppLocker rules removed; Exe enforcement set to **NotConfigured** |
+| **Apps** | AppLocker Exe allows (Windows / Program Files / `*`) + **Exe Deny** for listed apps + Appx allow-all packaged + one-shot close of already-running matches | Sentinel AppLocker rules removed; Exe **and Appx** set to **NotConfigured** |
 
 This is **not** WDAC CI policy and **not** a `taskkill` poller. WDAC is still detect-only (never deployed from this helper). `VMG_SENTINEL_AUDIT_ONLY=1` skips filters. AppLocker needs the Application Identity service; Windows Home (and some Pro SKUs) may not refuse `CreateProcess` — the banner `last_error` says so.
 
@@ -26,10 +26,10 @@ This is **not** WDAC CI policy and **not** a `taskkill` poller. WDAC is still de
 Angular UI  →  Electron main (user, unelevated)
                     │  named pipe (typed IPC only)
                     ▼
-     vmg-sentinel-helper.exe  (LocalSystem service, build fw-4)
+     vmg-sentinel-helper.exe  (LocalSystem service, build fw-5)
                     │
                     ├─ sites: DNS → INetFw outbound RemoteAddresses
-                    ├─ apps:  AppLocker allow-all + listed deny + one-shot close
+                    ├─ apps:  AppLocker Exe+Appx deny-list + one-shot close
                     ├─ WDAC:  detect only; never deploy CiTool XML
                     └─ clear on SetSession(false) including Quit, helper exit, --clear-blocks / --uninstall
 ```
@@ -56,7 +56,7 @@ The renderer never talks to the helper. Main sends typed IPC only: `ApplyPolicy`
 | `src/enforce/mde.rs` | Detect Defender Network Protection |
 | `src/enforce/wdac.rs` | Detect App Control; **never** deploy XML |
 | `src/enforce/firewall.rs` | INetFw outbound site/app rules; leftover wipe |
-| `src/enforce/applocker.rs` | Session-gated AppLocker exe deny XML + clear |
+| `src/enforce/applocker.rs` | Session-gated AppLocker Exe + Appx XML + clear (NotConfigured both) |
 | `src/policy.rs` | Parse, Ed25519 verify, seed allowlist merge |
 | `src/policy_store.rs` | `last-good.json` + tamper log |
 | `src/seed_allowlist.rs` | SSO / Citadel / OS-update hosts that cannot be denied |
@@ -159,7 +159,7 @@ npm run build:helper
 npm run verify:helper
 ```
 
-`build:helper` always rebuilds and **refuses** to stage an exe that is not `fw-4` or that lacks the AppLocker allow-all string. `verify:helper` is also run automatically by `npm run dist`. Unpackaged Electron looks in `native/policy-helper/bin/` first.
+`build:helper` always rebuilds and **refuses** to stage an exe that is not `fw-5` or that lacks `VMG Sentinel allow all`, `VMG Sentinel allow Windows`, or `VMG Sentinel allow all packaged`. `verify:helper` is also run automatically by `npm run dist`. Unpackaged Electron looks in `native/policy-helper/bin/` first.
 
 ### 2. LocalSystem service (required for real blocks)
 
@@ -172,7 +172,7 @@ npm run build:helper
 native\policy-helper\bin\vmg-sentinel-helper.exe --install
 ```
 
-That creates `VMGSentinelHelper` (LocalSystem, auto-start), stores last-good policy under `%ProgramData%\VMG\Sentinel\policy-helper`, and listens on `\\.\pipe\vmg-sentinel-helper`. Then `npm start` **attaches**. `--clear-blocks` removes leftover firewall + AppLocker rules. `--uninstall` clears those rules and deletes the service. Packaged Sentinel never kills the service, but **Quit** sends `SetSession(false)` so rules lift. Electron expects `helper_build` **`fw-4`**.
+That creates `VMGSentinelHelper` (LocalSystem, auto-start), stores last-good policy under `%ProgramData%\VMG\Sentinel\policy-helper`, and listens on `\\.\pipe\vmg-sentinel-helper`. Then `npm start` **attaches**. `--clear-blocks` removes leftover firewall + AppLocker rules. `--uninstall` clears those rules and deletes the service. Packaged Sentinel never kills the service, but **Quit** sends `SetSession(false)` so rules lift. Electron expects `helper_build` **`fw-5`**.
 
 ### 3. Audit vs block, and when anything is actually blocked
 
@@ -181,7 +181,7 @@ That creates `VMGSentinelHelper` (LocalSystem, auto-start), stores last-good pol
 | **Start Tracking** in Sentinel | **Stop Tracking** (and **Quit**, which sends `SetSession(false)`) |
 | Citadel `is_tracking` + status `online` / `busy` / `in_a_meeting` / `official_business` | `offline`, `not_working`, lunch/bio/unpaid break, `timetracker:stopped` |
 
-Policy can be loaded while idle. Blocks apply after `SetSession { active: true }` when policy `mode` is `block`. Sites use Windows Firewall outbound rules. Apps use session-gated AppLocker: **Allow Everyone `*`** plus deny listed exes (cannot launch), plus a one-shot close of already-running matches. Stop Tracking / Quit must set Exe enforcement to **NotConfigured** and remove `VMG Sentinel *` rules. Deny-only Enabled AppLocker (helper `fw-3`) bricks the device — do not ship that build. `VMG_SENTINEL_AUDIT_ONLY=1` skips filters.
+Policy can be loaded while idle. Blocks apply after `SetSession { active: true }` when policy `mode` is `block`. Sites use Windows Firewall outbound rules. Apps use session-gated AppLocker: Exe allows (Windows / Program Files / `*`) plus deny listed exes, plus Appx allow-all signed packaged apps, plus a one-shot close of already-running matches. Stop Tracking / Quit must set Exe **and Appx** to **NotConfigured** and remove `VMG Sentinel *` rules. Deny-only Enabled AppLocker (`fw-3`) bricks the device. Exe-only without Appx (`fw-4`) blocks Settings / This PC → Properties. `VMG_SENTINEL_AUDIT_ONLY=1` skips filters. On some Pro PCs, reboot once after the first apply so AppLocker actually enforces.
 
 Unpackaged `npm start` does **not** spawn a Windows helper. It attaches to `VMGSentinelHelper` (or an admin helper already on the pipe).
 
@@ -195,7 +195,7 @@ SSO / Microsoft 365 / Citadel / OS-update hosts in `policy-seed-allowlist.js` (a
 
 - **engine fw**: site firewall rules are in play.
 - **app_engine launch**: AppLocker launch deny is the app engine (or `last_error` if AppLocker is unavailable).
-- **build fw-4**: current helper (allow-all AppLocker + dirty reconcile). Older builds (`fw-3` and below) are rejected on attach.
+- **build fw-5**: current helper (Exe + Appx deny-list, Settings allowed). Older builds (`fw-4` and below) are rejected on attach.
 - **helper LocalSystem**: service path. `user` means blocking will not stick.
 - **needs_service**: install/reinstall `VMGSentinelHelper`.
 - **last_error**: firewall or AppLocker apply/clear failed.
@@ -249,7 +249,7 @@ Policy store (dev spawn): `{userData}/policy-helper/last-good.json`
 
 ## Lab recovery only (not a customer step)
 
-If an old helper left AppLocker Enabled after Stop Tracking, **do not** give `scripts/unbrick-applocker.ps1` to end users. Production users only Start / Stop Tracking. For a stuck lab machine, elevated:
+If an old helper left AppLocker Enabled after Stop Tracking, **do not** give `scripts/unbrick-applocker.ps1` to end users. Production users only Start / Stop Tracking. The script sets Exe **and Appx** to NotConfigured. For a stuck lab machine, elevated:
 
 ```bat
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts\unbrick-applocker.ps1

@@ -6,11 +6,12 @@ $file = Join-Path $env:TEMP 'vmg-sentinel-unbrick-applocker.xml'
 @'
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="NotConfigured" />
+  <RuleCollection Type="Appx" EnforcementMode="NotConfigured" />
 </AppLockerPolicy>
 '@ | Set-Content -LiteralPath $file -Encoding UTF8
 Set-AppLockerPolicy -XmlPolicy $file
 Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
 Get-NetFirewallRule -DisplayGroup 'VMG Sentinel' -ErrorAction SilentlyContinue |
   Remove-NetFirewallRule -ErrorAction SilentlyContinue
-Write-Host 'AppLocker Exe is NotConfigured. VMG Sentinel firewall rules removed.'
+Write-Host 'AppLocker Exe and Appx are NotConfigured. VMG Sentinel firewall rules removed.'
 Write-Host 'Steam, Spotify, Discord, and Photos should open again.'

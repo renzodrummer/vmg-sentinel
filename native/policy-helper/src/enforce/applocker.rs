@@ -26,7 +26,7 @@ pub fn apply(rules: &[AppDenyRule]) -> Result<u32, String> {
     let xml = exe_deny_xml(&targets);
     if !xml_is_safe_deny_list(&xml) {
         return Err(
-            "refusing AppLocker apply: XML is missing the Everyone allow-all rule (deny-only policy would lock the device)".into(),
+            "refusing AppLocker apply: XML is missing the Everyone allow-all Exe rule or the packaged-app allow (deny-only policy would lock Settings / This PC Properties)".into(),
         );
     }
     let path = write_temp_xml(&xml)?;
@@ -76,7 +76,7 @@ if ($raw) {
           [void]$collection.RemoveChild($node)
         }
       }
-      if ($collection.Type -eq 'Exe') {
+      if ($collection.Type -eq 'Exe' -or $collection.Type -eq 'Appx') {
         $collection.SetAttribute('EnforcementMode', 'NotConfigured')
       }
     }
@@ -86,6 +86,7 @@ if ($raw) {
     @'
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="NotConfigured" />
+  <RuleCollection Type="Appx" EnforcementMode="NotConfigured" />
 </AppLockerPolicy>
 '@ | Set-Content -Path $tmp -Encoding UTF8
     Set-AppLockerPolicy -XmlPolicy $tmp
@@ -94,6 +95,7 @@ if ($raw) {
   @'
 <AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="NotConfigured" />
+  <RuleCollection Type="Appx" EnforcementMode="NotConfigured" />
 </AppLockerPolicy>
 '@ | Set-Content -Path $tmp -Encoding UTF8
   Set-AppLockerPolicy -XmlPolicy $tmp
@@ -206,6 +208,14 @@ pub fn is_safe_deny_target(value: &str) -> bool {
             | "searchhost.exe"
             | "startmenuexperiencehost.exe"
             | "systemsettings.exe"
+            | "systemsettingsadminflows.exe"
+            | "systempropertiescomputername.exe"
+            | "systempropertiesadvanced.exe"
+            | "systempropertieshardware.exe"
+            | "systempropertiesprotection.exe"
+            | "systempropertiesremote.exe"
+            | "systempropertiesperformance.exe"
+            | "control.exe"
             | "applicationframehost.exe"
             | "taskmgr.exe"
             | "cmd.exe"
@@ -250,25 +260,58 @@ pub fn exe_deny_xml(targets: &[LaunchTarget]) -> String {
         r#"<AppLockerPolicy Version="1">
   <RuleCollection Type="Exe" EnforcementMode="Enabled">
 {rules}  </RuleCollection>
-</AppLockerPolicy>
+{DEFAULT_APPX_ALLOWS}</AppLockerPolicy>
 "#
     )
 }
 
-/// AppLocker Exe collections are default-deny once Enabled. A deny-only policy
-/// locks Task Manager, cmd, and apps under %LOCALAPPDATA%. Deny-list mode is
-/// Allow Everyone * plus explicit Deny rules (Deny wins).
-const DEFAULT_EXE_ALLOWS: &str = r#"    <FilePathRule Id="6b2e1c90-5d4a-4f11-9c8e-00a1b2c3d4e6" Name="VMG Sentinel allow all" Description="Required deny-list baseline; without this, Enabled AppLocker blocks the whole device" UserOrGroupSid="S-1-1-0" Action="Allow">
+/// AppLocker Exe collections are default-deny once Enabled. Microsoft's own
+/// default rules allow Windows and Program Files first, then a catch-all `*`.
+/// We do **not** add "Allow Administrators *" — BYOD users are often admins
+/// and that rule would let them launch Steam/Spotify during a session.
+const DEFAULT_EXE_ALLOWS: &str = r#"    <FilePathRule Id="7c3f2d01-6e5b-4a22-8d9f-11c2d3e4f506" Name="VMG Sentinel allow Windows" Description="Microsoft-style default: keep OS binaries (Settings hosts, SystemProperties) allowed" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="%WINDIR%\*" />
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="8d4a3e12-7f6c-4b33-9e0a-22d3e4f50617" Name="VMG Sentinel allow Program Files" Description="Microsoft-style default: keep installed desktop apps allowed unless explicitly denied" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePathCondition Path="%PROGRAMFILES%\*" />
+      </Conditions>
+    </FilePathRule>
+    <FilePathRule Id="6b2e1c90-5d4a-4f11-9c8e-00a1b2c3d4e6" Name="VMG Sentinel allow all" Description="Required deny-list baseline; without this, Enabled AppLocker blocks the whole device" UserOrGroupSid="S-1-1-0" Action="Allow">
       <Conditions>
         <FilePathCondition Path="*" />
       </Conditions>
     </FilePathRule>
 "#;
 
+/// Windows 11 Settings / This PC → Properties is a packaged app. Leaving Appx
+/// NotConfigured is not reliable once AppIDSvc + Exe enforcement are on; the
+/// Microsoft default is Enabled + allow all signed packaged apps. We do not
+/// put any packaged apps on the deny list.
+const DEFAULT_APPX_ALLOWS: &str = r#"  <RuleCollection Type="Appx" EnforcementMode="Enabled">
+    <FilePublisherRule Id="c3d4e5f6-7a8b-4c01-9d2e-10f1a2b3c4d5" Name="VMG Sentinel allow all packaged" Description="Required so Settings / This PC Properties stay usable while Exe deny-list is on" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions>
+        <FilePublisherCondition PublisherName="*" ProductName="*" BinaryName="*">
+          <BinaryVersionRange LowSection="*" HighSection="*" />
+        </FilePublisherCondition>
+      </Conditions>
+    </FilePublisherRule>
+  </RuleCollection>
+"#;
+
 fn xml_is_safe_deny_list(xml: &str) -> bool {
     xml.contains("VMG Sentinel allow all")
+        && xml.contains("VMG Sentinel allow Windows")
+        && xml.contains("VMG Sentinel allow Program Files")
+        && xml.contains("VMG Sentinel allow all packaged")
         && xml.contains("Action=\"Allow\"")
         && xml.contains("FilePathCondition Path=\"*\"")
+        && xml.contains("%WINDIR%\\*")
+        && xml.contains("%PROGRAMFILES%\\*")
+        && xml.contains("RuleCollection Type=\"Appx\"")
+        && xml.contains("PublisherName=\"*\"")
         && xml.contains("UserOrGroupSid=\"S-1-1-0\"")
 }
 
@@ -363,6 +406,10 @@ mod tests {
         assert!(applocker_path(r"C:\Windows\System32\notepad.exe").is_none());
         assert!(applocker_path("taskmgr.exe").is_none());
         assert!(applocker_path("cmd.exe").is_none());
+        assert!(applocker_path("systemsettings.exe").is_none());
+        assert!(applocker_path("systemsettingsadminflows.exe").is_none());
+        assert!(applocker_path("systempropertiescomputername.exe").is_none());
+        assert!(applocker_path("control.exe").is_none());
         assert!(applocker_path("vmg-sentinel-helper.exe").is_none());
     }
 
@@ -375,8 +422,26 @@ mod tests {
         assert!(xml.contains(&rule_id("path:*\\spotify.exe")));
         assert!(xml.contains("Action=\"Allow\""));
         assert!(xml.contains("VMG Sentinel allow all"));
+        assert!(xml.contains("VMG Sentinel allow Windows"));
+        assert!(xml.contains("VMG Sentinel allow Program Files"));
+        assert!(xml.contains("VMG Sentinel allow all packaged"));
+        assert!(xml.contains("%WINDIR%\\*"));
+        assert!(xml.contains("%PROGRAMFILES%\\*"));
+        assert!(xml.contains("RuleCollection Type=\"Appx\""));
         assert!(xml.contains("FilePathCondition Path=\"*\""));
         assert!(xml_is_safe_deny_list(&xml));
+    }
+
+    #[test]
+    fn refuses_xml_without_packaged_allow() {
+        let exe_only = r#"<AppLockerPolicy Version="1">
+  <RuleCollection Type="Exe" EnforcementMode="Enabled">
+    <FilePathRule Id="6b2e1c90-5d4a-4f11-9c8e-00a1b2c3d4e6" Name="VMG Sentinel allow all" UserOrGroupSid="S-1-1-0" Action="Allow">
+      <Conditions><FilePathCondition Path="*" /></Conditions>
+    </FilePathRule>
+  </RuleCollection>
+</AppLockerPolicy>"#;
+        assert!(!xml_is_safe_deny_list(exe_only));
     }
 
     #[test]

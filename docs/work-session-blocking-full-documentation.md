@@ -7,11 +7,11 @@ Complete reference for **VMG Sentinel** system-wide blocking on Windows: what it
 | Document | Purpose |
 |---|---|
 | [work-session-site-and-app-blocking.md](./work-session-site-and-app-blocking.md) | File map, packages, installer commands, tests |
-| [work-session-blocking-canvas.pdf](./work-session-blocking-canvas.pdf) | One-page PDF of the fw-4 architecture canvas |
+| [work-session-blocking-canvas.pdf](./work-session-blocking-canvas.pdf) | One-page PDF of the architecture canvas (regenerate after fw-5; HTML is current) |
 | [system-wide-site-and-app-blocking.md](./system-wide-site-and-app-blocking.md) | Design rationale, rejected approaches, corporate standards |
 | [prompts/implement-system-wide-blocking.md](./prompts/implement-system-wide-blocking.md) | Historical implementation prompt (superseded by runbook for day-to-day) |
 
-**Helper build:** `fw-4` (Windows Firewall for sites + AppLocker **Allow Everyone `*`** plus listed denies; dirty reconcile; Quit sends `SetSession(false)`).
+**Helper build:** `fw-5` (Windows Firewall for sites + AppLocker **Exe** Allow `%WINDIR%\*` / `%PROGRAMFILES%\*` / `*` plus listed denies + **Appx** allow all signed packaged apps so Settings / This PC → Properties stay usable; dirty reconcile; Quit sends `SetSession(false)`). Older helpers including **`fw-4`** are rejected on attach.
 
 ---
 
@@ -54,15 +54,15 @@ When tracking **stops** or the user **quits** Sentinel, firewall and AppLocker r
 
 ## 2. What gets blocked and when
 
-### 2.1 Enforcement matrix (shipped `fw-4`)
+### 2.1 Enforcement matrix (shipped `fw-5`)
 
 | Target | Mechanism while tracking | When tracking stops or the app quits |
 |---|---|---|
 | **Sites** (deny list hostnames) | Windows Defender Firewall **outbound BLOCK** on DNS-resolved **IPv4/IPv6** addresses | All rules in display group **`VMG Sentinel`** removed |
-| **Apps** (deny list executables) | AppLocker **Allow Everyone `*`** plus **Exe Deny** (path / SHA-256 / publisher) — listed apps cannot `CreateProcess` | `VMG Sentinel *` rules removed; Exe **NotConfigured** |
+| **Apps** (deny list executables) | AppLocker **Exe** Allow `%WINDIR%\*` + `%PROGRAMFILES%\*` + Everyone `*` (`VMG Sentinel allow all`) plus **Exe Deny** (path / SHA-256 / publisher); **Appx** Enabled with **Allow all signed packaged apps** (`VMG Sentinel allow all packaged`) so Settings / This PC → Properties are not blocked | `VMG Sentinel *` rules removed; Exe **and Appx** **NotConfigured** |
 | **Already-running deny apps** | **One-shot** terminate when session starts (not a periodic kill loop) | User can launch again after stop |
 
-Sites are **network-blocked** (any process). Apps are **launch-blocked** (cannot open at all during the session, including offline use).
+Sites are **network-blocked** (any process). Listed Win32 apps are **launch-blocked** on SKUs that enforce AppLocker (cannot open during the session, including offline use). Windows Settings and other signed packaged apps stay **allowed**.
 
 ### 2.2 What turns enforcement on or off
 
@@ -116,19 +116,20 @@ Citadel `GET …/v1/agent/endpoint-policy` replaces this when a signed document 
                                 ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  vmg-sentinel-helper.exe  (VMGSentinelHelper, LocalSystem)      │
-│  build fw-4 • verify policy • 45s reconcile (skip if unchanged) │
+│  build fw-5 • verify policy • 45s reconcile (skip if unchanged) │
 └───────────────┬─────────────────────────────┬───────────────────┘
                 │                             │
                 ▼                             ▼
    ┌────────────────────────┐    ┌──────────────────────────────┐
-   │ Windows Firewall       │    │ AppLocker (Exe, local)       │
+   │ Windows Firewall       │    │ AppLocker Exe + Appx         │
    │ INetFwPolicy2 outbound │    │ Set-AppLockerPolicy -Merge   │
    │ RemoteAddresses / App  │    │ + Application Identity svc   │
    └───────────┬────────────┘    └──────────────┬───────────────┘
                │                                  │
                ▼                                  ▼
         Chrome, Edge, curl                   steam.exe, spotify.exe
-        (any outbound to deny IPs)           (CreateProcess denied)
+        (any outbound to deny IPs)           (CreateProcess denied;
+                                              Settings / This PC OK)
 ```
 
 ### 3.2 Mermaid (for Confluence / GitHub)
@@ -138,9 +139,9 @@ flowchart TB
   UI[Angular UI]
   Main[Electron main unelevated]
   Pipe[Named pipe IPC]
-  Helper[vmg-sentinel-helper fw-4 LocalSystem]
+  Helper[vmg-sentinel-helper fw-5 LocalSystem]
   FW[Windows Firewall sites]
-  AL[AppLocker apps]
+  AL[AppLocker Exe plus Appx]
   Net[All browsers and curl]
   Exe[Denied executables]
 
@@ -183,7 +184,7 @@ The renderer **never** opens the named pipe. A compromised Chromium renderer can
 | Packaging | `electron-builder` NSIS **per-machine**, `build/installer.nsh` hooks |
 | Tests | `cargo test` (helper), `npm run test:policy` (Vitest) |
 
-**Build identifier:** Electron expects `helper_build === "fw-4"` in `GetStatus`. Older helpers (`wfp-1`, `fw-1`, `fw-2`, `fw-3`) are rejected on attach. `npm run dist` runs `verify:helper` and will not package an exe that is not `fw-4` or that lacks `VMG Sentinel allow all`.
+**Build identifier:** Electron expects `helper_build === "fw-5"` in `GetStatus`. Older helpers (`wfp-1`, `fw-1`, `fw-2`, `fw-3`, **`fw-4`**) are rejected on attach. `npm run dist` runs `verify:helper` and will not package an exe that is not `fw-5` or that lacks `VMG Sentinel allow all`, `VMG Sentinel allow Windows`, or `VMG Sentinel allow all packaged`.
 
 ---
 
@@ -249,11 +250,12 @@ Electron:
 
 When session block is active:
 
-1. **AppLocker:** merge XML that always includes **Allow Everyone `*`** (`VMG Sentinel allow all`) plus listed denies. Apply **refuses** if that allow-all rule is missing (deny-only Enabled AppLocker locks Task Manager, Photos, and most apps). Path / hash / publisher denies as before.
-2. **Firewall application rules:** for **currently running** processes matching deny rules, add outbound block by application path (network path for already-open apps).
-3. **One-shot close:** enumerate processes once per policy version; terminate matches (Steam/Spotify if already open when tracking starts). **Not** a 45s kill loop.
+1. **AppLocker Exe:** merge XML that always includes Microsoft-style allows — **`%WINDIR%\*`** (`VMG Sentinel allow Windows`), **`%PROGRAMFILES%\*`** (`VMG Sentinel allow Program Files`), and **Everyone `*`** (`VMG Sentinel allow all`) — plus listed denies. There is **no** “Allow Administrators `*`” rule (BYOD users are often admins; that would let them launch Steam). Apply **refuses** if the Exe allow-all, Windows/Program Files allows, or packaged allow are missing (deny-only Enabled AppLocker locks Task Manager; Exe-only without Appx locks Settings / This PC → Properties). Path / hash / publisher denies as before.
+2. **AppLocker Appx:** **Enabled** with **Allow all signed packaged apps** (`VMG Sentinel allow all packaged`). Required so Windows 11 Settings / This PC → Properties stay usable. We do not deny any packaged app. Leaving Appx `NotConfigured` is not reliable once AppIDSvc + Exe enforcement are on.
+3. **Firewall application rules:** for **currently running** processes matching deny rules, add outbound block by **that exact application path**. Child processes (for example `steamwebhelper.exe`) are not listed and can still use the network. The rule appears after the helper sees the process (up to the 45s reconcile).
+4. **One-shot close:** enumerate processes once per policy version; terminate matches (Steam/Spotify if already open when tracking starts). **Not** a 45s kill loop.
 
-**Safe deny targets:** helper rejects Windows paths, Sentinel binaries, and shell/system process names (`explorer.exe`, `lsass.exe`, etc.). Invalid hashes are ignored. Publisher values that match Microsoft Windows / Microsoft Corporation are rejected so a bad policy cannot deny the OS.
+**Safe deny targets:** helper rejects Windows paths, Sentinel binaries, and shell/system process names (`explorer.exe`, `lsass.exe`, `systemsettings.exe`, `systemsettingsadminflows.exe`, `systemproperties*.exe`, `control.exe`, `taskmgr.exe`, etc.). Invalid hashes are ignored. Publisher values that match Microsoft Windows / Microsoft Corporation are rejected so a bad policy cannot deny the OS.
 
 ### 6.3 Reconciliation loop
 
@@ -277,7 +279,7 @@ Install (NSIS) or --install
 
 User opens Sentinel (npm start or installed app)
     → Electron attachPolicyHelper (no spawn on Windows packaged/unpackaged default)
-    → GetStatus; refuse if helper_build ≠ fw-4
+    → GetStatus; refuse if helper_build ≠ fw-5
 
 If policy_loaded false
     → ApplyPolicy(local signed deny list from dev-block-policy.js)
@@ -286,11 +288,11 @@ User Start Tracking
     → pushWorkSession → SetSession(true) → reconcile → FW + AppLocker
 
 User Stop Tracking (or Citadel idle)
-    → SetSession(false) → clear FW + AppLocker
+    → SetSession(false) → clear FW + AppLocker (Exe and Appx NotConfigured)
 
 User uninstalls
     → --clear-blocks then --uninstall (installer.nsh)
-    → remove VMG Sentinel firewall rules + AppLocker rules + delete service
+    → remove VMG Sentinel firewall rules + AppLocker Exe/Appx rules + delete service
 ```
 
 **Citadel-only installs:** blocking still works if local dev policy is enabled; otherwise user needs a signed Citadel policy with `mode: block`.
@@ -342,7 +344,7 @@ Users should **not** run the helper manually for normal operation. Packaged Sent
 |---|---|
 | `engine` `fw` | Site firewall rules active (when enforcing) |
 | `app_engine` `launch` | AppLocker launch deny selected |
-| `helper_build` `fw-4` | Required build |
+| `helper_build` `fw-5` | Required build (reject `fw-4` and older) |
 | `privilege` `LocalSystem` | Service path OK; `user` → blocks will not stick |
 | `needs_service` | Install/reinstall `VMGSentinelHelper` |
 | `last_error` | Firewall or AppLocker apply/clear failed |
@@ -352,19 +354,23 @@ Users should **not** run the helper manually for normal operation. Packaged Sent
 
 1. **Sites:** `curl.exe -sI https://www.reddit.com` — expect timeout/refused while tracking; 200 when stopped and rules cleared.
 2. **Apps:** double-click Steam while tracking — launch denied (on SKUs with AppLocker); after stop, launch succeeds.
+3. **Settings:** while tracking, This PC → Properties / Settings → About should **open**. A hard “blocked by your administrator” dialog means an old helper (`fw-4` or earlier) or leftover AppLocker. Grey “managed by your organization” on Rename this PC can still appear whenever AppLocker is Enabled.
 
-Banner alone is not proof.
+Banner alone is not proof. On some Pro PCs AppLocker only enforces after a **reboot**.
 
 ### 10.3 Common failures
 
 | Symptom | Likely cause | Action |
 |---|---|---|
-| curl 200 while tracking | Old helper, no policy, or CDN/DoH IP miss | Check `helper_build`, `policy_loaded`, `privilege`; reinstall fw-4 service |
-| Apps still blocked after Stop Tracking | Old helper AppLocker clear used a broken `.Save()` | Install fw-4. Lab only: `scripts/unbrick-applocker.ps1` (elevated). Not a customer step. |
+| curl 200 while tracking | Old helper, no policy, or CDN/DoH IP miss | Check `helper_build` is **fw-5**, `policy_loaded`, `privilege`; reinstall fw-5 service |
+| This PC → Properties / Settings blocked while tracking | `fw-4` Exe-only AppLocker (no Appx allow) | Install **fw-5**. Reboot once if AppLocker just started enforcing. |
+| Apps still blocked after Stop Tracking | Old helper AppLocker clear used a broken `.Save()` or Appx left Enabled | Install fw-5. Lab only: `scripts/unbrick-applocker.ps1` (elevated; sets Exe **and Appx** NotConfigured). Not a customer step. |
 | Access denied on pipe | User spawned helper vs service | Stop user helper; use service only |
 | Tracking on, idle banner | SetSession without ApplyPolicy | Fixed in main: apply local policy if unloaded; retry attach |
 | Blocks after uninstall | Leftover INetFw / AppLocker | Run `--clear-blocks` elevated; or `Get-NetFirewallRule -DisplayGroup "VMG Sentinel" \| Remove-NetFirewallRule` |
-| Steam opens on Home edition | AppLocker not enforced | Expected fail-open; see `last_error` |
+| Steam opens on Home edition | AppLocker not enforced | Expected fail-open; see `last_error`. Sites + one-shot close still apply. |
+| Steam opens on Pro until reboot | AppID / AppLocker not live until restart | Reboot once after first apply; then launch deny should stick |
+| Steam has internet after it relaunches | Firewall rule is only the running `steam.exe` path; `steamwebhelper.exe` is not denied | Expected on SKUs without launch deny. Wait up to ~45s for the path rule. Offline use still works. |
 | SmartScreen on Setup | Unsigned installer | More info → Run anyway until Authenticode |
 
 ### 10.4 Tests
@@ -375,7 +381,7 @@ npm run test:policy
 npm run verify:helper
 ```
 
-`npm run dist` runs `build:helper` then `verify:helper` and fails if the staged exe is not `fw-4` or lacks allow-all.
+`npm run dist` runs `build:helper` then `verify:helper` and fails if the staged exe is not `fw-5` or lacks `VMG Sentinel allow all`, `VMG Sentinel allow Windows`, or `VMG Sentinel allow all packaged`.
 
 ---
 
@@ -394,7 +400,7 @@ npm run verify:helper
 ### 11.3 While tracking (ongoing)
 
 - **Firewall:** each outbound connection evaluated against a small set of IP block rules — normal Windows cost.
-- **AppLocker:** per **new process** launch, path rule check for denied names — low overhead for a few exe rules.
+- **AppLocker:** per **new process** launch, path/publisher check. Extra `fw-5` **allow** rules (Windows, Program Files, packaged) do not add a background scanner; cost stays comparable to `fw-4`.
 - **Every 45s reconcile:** DNS refresh + fingerprint compare. Unchanged state does **not** rewrite Firewall or AppLocker. IP or running-app path changes refresh firewall only. AppLocker PowerShell runs when deny lists change or the last apply failed.
 
 ### 11.4 User-visible impact
@@ -407,7 +413,7 @@ npm run verify:helper
 
 ## 12. Production optimization roadmap (review)
 
-Independent review aligned with the items below. **Status** reflects helper `fw-4`.
+Independent review aligned with the items below. **Status** reflects helper `fw-5`.
 
 | # | Recommendation | Status | Notes |
 |---|---|---|---|
@@ -428,9 +434,9 @@ Not shipped inside Sentinel today; document for IT:
 - **Windows:** NRPT or MDM DNS so clients use resolvers the org controls.
 - **MDE:** Network Protection / web content filtering for hostname/category blocks on managed tenants (complement, not replace, session gate).
 
-### Architectural comparison (legacy hacks vs fw-4)
+### Architectural comparison (legacy hacks vs fw-5)
 
-| Feature | Legacy approach (rejected) | Current fw-4 |
+| Feature | Legacy approach (rejected) | Current fw-5 |
 |---|---|---|
 | App enforcement | Continuous `taskkill` / IFEO | AppLocker launch deny + one-shot close |
 | Site enforcement | Hosts file (`127.0.0.1`) | Windows Firewall outbound IP rules |
@@ -459,14 +465,16 @@ Not shipped inside Sentinel today; document for IT:
 | **Packaged + dev parity** | Local deny list available for `npm start` and `npm run dist` unless disabled |
 | **Audit mode path** | `VMG_SENTINEL_AUDIT_ONLY` and policy `mode: audit` for rollout |
 | **Seed allowlist** | Reduces risk of blocking SSO / updates |
+| **Settings / This PC stay usable** | `fw-5` Appx allow-all + Windows folder allows; apply refuses XML that would lock Settings |
 
 ### 13.2 Cons
 
 | Drawback | Explanation |
 |---|---|
 | **IP-based site block** | CDN, DoH, ECH, VPN can bypass or miss denies; not hostname/SNI filtering |
-| **AppLocker SKU gaps** | Windows Home / some Pro: launch deny may not enforce; only network + one-shot close |
-| **Leftover rules on old helpers** | `fw-3` clear used a broken AppLocker `.Save()`; Stop Tracking left launch denies. **fw-4** writes XML + NotConfigured. Lab recovery is not a customer step. |
+| **AppLocker SKU gaps** | Windows Home / some Pro: launch deny may not enforce until reboot or at all; only network + one-shot close |
+| **Leftover rules on old helpers** | `fw-3` clear used a broken AppLocker `.Save()`. **fw-4** cleared Exe only (Settings could stay blocked). **fw-5** writes XML and sets Exe **and Appx** to NotConfigured. Lab recovery is not a customer step. |
+| **App internet is path-only** | Firewall-by-exe applies to the running path (e.g. `steam.exe`), not helpers like `steamwebhelper.exe` |
 | **45s DNS still runs** | Helper still resolves deny hosts every 45s; apply is skipped when IPs match |
 | **Default policy is still path** | Local deny list uses `steam.exe` / `spotify.exe`; hash/publisher need Citadel-authored values |
 | **One-shot terminate** | Already-open Steam/Spotify closed once at session start — can lose unsaved state in those apps |
@@ -490,21 +498,24 @@ Not shipped inside Sentinel today; document for IT:
 | **WFP SNI / callout** | Hostname-aware | Prior WFP IP attempt failed in practice; more complex |
 | **WDAC deploy from agent** | Strong launch control | IT ownership, brick risk; **detect-only** in Sentinel |
 | **MDE Network Protection only** | Enterprise-grade | All-day MDM policy, not session-gated Start Tracking |
-| **Current fw-4** | Session-gated, no MITM, allow-all + listed launch deny | IP site block + AppLocker SKU limits |
+| **Current fw-5** | Session-gated, no MITM, Exe+Appx deny-list, Settings allowed | IP site block + AppLocker SKU limits |
 
 ---
 
 ## 14. Limitations and known issues
 
 1. **CDN / DoH:** Reddit/YouTube may still load if traffic uses IPs the helper never resolved.
-2. **AppLocker on Home:** Launch deny fail-open; document in support playbooks.
-3. **Uninstall without `--clear-blocks`:** Historical installs could leave firewall rules; installer now mitigates.
-4. **Chrome DoH:** Uses remote resolver; local DNS resolve in helper may not match browser path.
-5. **Shared cloud IPs:** Theoretic collateral if a deny IP is shared (mitigated by targeting site-specific resolves, not arbitrary /24).
-6. **Meeting / allowlist:** Meeting allowlists in JS do not automatically bypass firewall IPs unless reflected in policy allow list.
-7. **Policy TTL expiry:** After TTL, mode drops to audit — blocks stop until new signed policy.
-8. **Multiple helpers:** First pipe instance wins; user spawn causes Access denied noise.
-9. **App hash/publisher in JSON:** Deployed to AppLocker when present and safe; default local list is still path-only.
+2. **AppLocker on Home:** Launch deny fail-open; document in support playbooks. Sites and one-shot close still apply.
+3. **AppLocker on Pro:** Enforcement can require a **reboot** after the first apply. `Set-AppLockerPolicy` may succeed before launches are actually denied.
+4. **Settings “managed by your organization”:** Greyed Rename this PC / similar can appear **while AppLocker is Enabled**, even with `fw-5` allows. A hard “blocked by administrator” dialog on This PC → Properties is the `fw-4` Exe-only gap; install `fw-5`.
+5. **Uninstall without `--clear-blocks`:** Historical installs could leave firewall rules; installer now mitigates.
+6. **Chrome DoH:** Uses remote resolver; local DNS resolve in helper may not match browser path.
+7. **Shared cloud IPs:** Theoretic collateral if a deny IP is shared (mitigated by targeting site-specific resolves, not arbitrary /24).
+8. **Meeting / allowlist:** Meeting allowlists in JS do not automatically bypass firewall IPs unless reflected in policy allow list.
+9. **Policy TTL expiry:** After TTL, mode drops to audit — blocks stop until new signed policy.
+10. **Multiple helpers:** First pipe instance wins; user spawn causes Access denied noise.
+11. **App hash/publisher in JSON:** Deployed to AppLocker when present and safe; default local list is still path-only.
+12. **App Firewall is not “the whole app”:** Only the matching running path is blocked; Steam/Spotify child processes can stay online.
 
 ---
 
@@ -544,7 +555,8 @@ See also runbook section “Still later” in [work-session-site-and-app-blockin
 
 | Term | Definition |
 |---|---|
-| **AppLocker** | Windows application control; Exe deny rules block launch by path/publisher/hash |
+| **AppLocker** | Windows application control. Sentinel uses **Exe** (allow OS + deny listed apps) and **Appx** (allow all signed packaged apps). |
+| **Appx** | AppLocker packaged-app collection. Settings / This PC → Properties is a signed packaged app on Windows 11. |
 | **AppIDSvc** | Application Identity service required for AppLocker enforcement |
 | **Citadel** | Backend / time-tracking integration for policy and session state |
 | **CreateProcess** | Windows API to start a process; AppLocker intercepts at launch |
@@ -560,4 +572,4 @@ See also runbook section “Still later” in [work-session-site-and-app-blockin
 
 ---
 
-*Document version: aligns with helper `HELPER_BUILD = "fw-4"` (allow-all AppLocker, Quit clears session, verify:helper on dist, 2026-09-23).*
+*Document version: aligns with helper `HELPER_BUILD = "fw-5"` (Exe Windows/Program Files/`*` allows + Appx packaged allow-all, Quit clears Exe and Appx, verify:helper on dist, 2026-09-25).*

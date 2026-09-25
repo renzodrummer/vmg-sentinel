@@ -23,8 +23,8 @@ function binaryHasAscii(file, needle) {
 }
 
 const expected = currentHelperBuild();
-if (expected !== 'fw-4') {
-  console.error(`refusing to stage: HELPER_BUILD in lib.rs is ${expected}, expected fw-4`);
+if (expected !== 'fw-5') {
+  console.error(`refusing to stage: HELPER_BUILD in lib.rs is ${expected}, expected fw-5`);
   process.exit(1);
 }
 
@@ -47,8 +47,8 @@ if (!fs.existsSync(rebuildExe)) {
   console.error('helper binary missing after cargo build');
   process.exit(1);
 }
-if (!binaryHasAscii(rebuildExe, 'fw-4')) {
-  console.error('refusing to stage: rebuilt exe does not contain fw-4');
+if (!binaryHasAscii(rebuildExe, 'fw-5')) {
+  console.error('refusing to stage: rebuilt exe does not contain fw-5');
   process.exit(1);
 }
 if (!binaryHasAscii(rebuildExe, 'VMG Sentinel allow all')) {
@@ -57,7 +57,19 @@ if (!binaryHasAscii(rebuildExe, 'VMG Sentinel allow all')) {
   );
   process.exit(1);
 }
+if (!binaryHasAscii(rebuildExe, 'VMG Sentinel allow Windows')) {
+  console.error(
+    'refusing to stage: rebuilt exe is missing the AppLocker Windows-folder allow',
+  );
+  process.exit(1);
+}
+if (!binaryHasAscii(rebuildExe, 'VMG Sentinel allow all packaged')) {
+  console.error(
+    'refusing to stage: rebuilt exe is missing the AppLocker packaged allow-all string',
+  );
+  process.exit(1);
+}
 
 fs.mkdirSync(binDir, { recursive: true });
 fs.copyFileSync(rebuildExe, dest);
-console.log(`staged ${rebuildExe} -> ${dest} (fw-4, allow-all present)`);
+console.log(`staged ${rebuildExe} -> ${dest} (fw-5, exe + packaged allow-all present)`);
